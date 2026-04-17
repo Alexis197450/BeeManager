@@ -9,6 +9,8 @@ export default function HivesScreen() {
   const [editingHive, setEditingHive] = useState<any>(null);
   const [newHiveName, setNewHiveName] = useState('');
   const [newHiveType, setNewHiveType] = useState('Langstroth');
+  const [newHiveFloor, setNewHiveFloor] = useState('');
+  const [newHiveBroodBox, setNewHiveBroodBox] = useState('Κλασσική Langstroth');
   const [newHiveNotes, setNewHiveNotes] = useState('');
   const [newHivePurchaseYear, setNewHivePurchaseYear] = useState('');
 
@@ -26,6 +28,8 @@ export default function HivesScreen() {
     setEditingHive(null);
     setNewHiveName('');
     setNewHiveType('Langstroth');
+    setNewHiveFloor('');
+    setNewHiveBroodBox('Κλασσική Langstroth');
     setNewHiveNotes('');
     setNewHivePurchaseYear('');
     setModalVisible(true);
@@ -35,6 +39,8 @@ export default function HivesScreen() {
     setEditingHive(hive);
     setNewHiveName(hive.name);
     setNewHiveType(hive.type);
+    setNewHiveFloor(hive.floor_type || '');
+    setNewHiveBroodBox(hive.brood_box_type || 'Κλασσική Langstroth');
     setNewHiveNotes(hive.notes || '');
     setNewHivePurchaseYear(hive.purchase_year ? String(hive.purchase_year) : '');
     setModalVisible(true);
@@ -50,6 +56,8 @@ export default function HivesScreen() {
       const { error } = await supabase.from('hives').update({
         name: newHiveName,
         type: newHiveType,
+        floor_type: newHiveFloor,
+        brood_box_type: newHiveBroodBox,
         notes: newHiveNotes,
         purchase_year: newHivePurchaseYear ? parseInt(newHivePurchaseYear) : null,
       }).eq('id', editingHive.id);
@@ -61,6 +69,8 @@ export default function HivesScreen() {
       const { error } = await supabase.from('hives').insert({
         name: newHiveName,
         type: newHiveType,
+        floor_type: newHiveFloor,
+        brood_box_type: newHiveBroodBox,
         notes: newHiveNotes,
         purchase_year: newHivePurchaseYear ? parseInt(newHivePurchaseYear) : null,
       });
@@ -89,7 +99,11 @@ export default function HivesScreen() {
     );
   }
 
-  const hiveTypes = ['Langstroth', 'Dadant', 'Άλλο'];
+  const isClassic = newHiveBroodBox === 'Κλασσική Langstroth' || newHiveBroodBox === 'Κλασσική Dadant';
+
+  const hiveTypes = ['Langstroth', 'Dadant', 'Πλαστική'];
+  const broodBoxTypes = ['Κλασσική Langstroth', 'Κλασσική Dadant', 'Με κινητό πάτο', 'Πλαστική'];
+  const floorTypes = ['Αεριζόμενος πλαστικός', 'Πλαστικός κλειστός', 'Ξύλινος'];
 
   return (
     <View style={styles.container}>
@@ -115,6 +129,8 @@ export default function HivesScreen() {
               <View style={styles.hiveInfo}>
                 <Text style={styles.hiveName}>{item.name}</Text>
                 <Text style={styles.hiveType}>{item.type}</Text>
+                {item.brood_box_type ? <Text style={styles.hiveNotes}>Γονοφωλιά: {item.brood_box_type}</Text> : null}
+                {item.floor_type ? <Text style={styles.hiveNotes}>Πάτος: {item.floor_type}</Text> : null}
                 {item.purchase_year ? <Text style={styles.hiveNotes}>Έτος αγοράς: {item.purchase_year}</Text> : null}
                 {item.notes ? <Text style={styles.hiveNotes}>{item.notes}</Text> : null}
               </View>
@@ -159,6 +175,45 @@ export default function HivesScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            <Text style={styles.label}>Τύπος Γονοφωλιάς</Text>
+            <View style={styles.typeContainer}>
+              {broodBoxTypes.map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.typeButton, newHiveBroodBox === type && styles.typeButtonActive]}
+                  onPress={() => {
+                    setNewHiveBroodBox(type);
+                    if (type === 'Κλασσική Langstroth' || type === 'Κλασσική Dadant') {
+                      setNewHiveFloor('');
+                    }
+                  }}
+                >
+                  <Text style={[styles.typeButtonText, newHiveBroodBox === type && styles.typeButtonTextActive]}>
+                    {type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {!isClassic && (
+              <>
+                <Text style={styles.label}>Τύπος Πάτου</Text>
+                <View style={styles.typeContainer}>
+                  {floorTypes.map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[styles.typeButton, newHiveFloor === type && styles.typeButtonActive]}
+                      onPress={() => setNewHiveFloor(type)}
+                    >
+                      <Text style={[styles.typeButtonText, newHiveFloor === type && styles.typeButtonTextActive]}>
+                        {type}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
 
             <TextInput
               style={styles.input}
@@ -281,6 +336,7 @@ const styles = StyleSheet.create({
   },
   typeContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     marginBottom: 15,
   },

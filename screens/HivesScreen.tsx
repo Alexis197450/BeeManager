@@ -6,6 +6,7 @@ export default function HivesScreen() {
   const [hives, setHives] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingHive, setEditingHive] = useState<any>(null);
   const [newHiveName, setNewHiveName] = useState('');
   const [newHiveType, setNewHiveType] = useState('Langstroth');
   const [newHiveNotes, setNewHiveNotes] = useState('');
@@ -21,32 +22,78 @@ export default function HivesScreen() {
     setLoading(false);
   }
 
-  async function addHive() {
+  function openAddModal() {
+    setEditingHive(null);
+    setNewHiveName('');
+    setNewHiveType('Langstroth');
+    setNewHiveNotes('');
+    setNewHivePurchaseYear('');
+    setModalVisible(true);
+  }
+
+  function openEditModal(hive: any) {
+    setEditingHive(hive);
+    setNewHiveName(hive.name);
+    setNewHiveType(hive.type);
+    setNewHiveNotes(hive.notes || '');
+    setNewHivePurchaseYear(hive.purchase_year ? String(hive.purchase_year) : '');
+    setModalVisible(true);
+  }
+
+  async function saveHive() {
     if (!newHiveName.trim()) {
       Alert.alert('Σφάλμα', 'Βάλε όνομα για την κυψέλη!');
       return;
     }
-    const { error } = await supabase.from('hives').insert({
-      name: newHiveName,
-      type: newHiveType,
-      notes: newHiveNotes,
-      purchase_year: newHivePurchaseYear ? parseInt(newHivePurchaseYear) : null,
-    });
-    if (!error) {
-      setModalVisible(false);
-      setNewHiveName('');
-      setNewHiveType('Langstroth');
-      setNewHiveNotes('');
-      setNewHivePurchaseYear('');
-      fetchHives();
+
+    if (editingHive) {
+      const { error } = await supabase.from('hives').update({
+        name: newHiveName,
+        type: newHiveType,
+        notes: newHiveNotes,
+        purchase_year: newHivePurchaseYear ? parseInt(newHivePurchaseYear) : null,
+      }).eq('id', editingHive.id);
+      if (!error) {
+        setModalVisible(false);
+        fetchHives();
+      }
+    } else {
+      const { error } = await supabase.from('hives').insert({
+        name: newHiveName,
+        type: newHiveType,
+        notes: newHiveNotes,
+        purchase_year: newHivePurchaseYear ? parseInt(newHivePurchaseYear) : null,
+      });
+      if (!error) {
+        setModalVisible(false);
+        fetchHives();
+      }
     }
+  }
+
+  async function deleteHive(id: string) {
+    Alert.alert(
+      'Διαγραφή Κυψέλης',
+      'Είσαι σίγουρος; Η ενέργεια δεν αναιρείται!',
+      [
+        { text: 'Ακύρωση', style: 'cancel' },
+        {
+          text: 'Διαγραφή',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('hives').delete().eq('id', id);
+            fetchHives();
+          },
+        },
+      ]
+    );
   }
 
   const hiveTypes = ['Langstroth', 'Dadant', 'Άλλο'];
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+      <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
         <Text style={styles.addButtonText}>+ Νέα Κυψέλη</Text>
       </TouchableOpacity>
 
@@ -63,7 +110,7 @@ export default function HivesScreen() {
           data={hives}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.hiveCard}>
+            <View style={styles.hiveCard}>
               <Text style={styles.hiveIcon}>🐝</Text>
               <View style={styles.hiveInfo}>
                 <Text style={styles.hiveName}>{item.name}</Text>
@@ -71,7 +118,15 @@ export default function HivesScreen() {
                 {item.purchase_year ? <Text style={styles.hiveNotes}>Έτος αγοράς: {item.purchase_year}</Text> : null}
                 {item.notes ? <Text style={styles.hiveNotes}>{item.notes}</Text> : null}
               </View>
-            </TouchableOpacity>
+              <View style={styles.actionButtons}>
+                <TouchableOpacity style={styles.editButton} onPress={() => openEditModal(item)}>
+                  <Text style={styles.editButtonText}>✏️</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteButton} onPress={() => deleteHive(item.id)}>
+                  <Text style={styles.deleteButtonText}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           )}
         />
       )}
@@ -79,7 +134,9 @@ export default function HivesScreen() {
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Νέα Κυψέλη</Text>
+            <Text style={styles.modalTitle}>
+              {editingHive ? 'Επεξεργασία Κυψέλης' : 'Νέα Κυψέλη'}
+            </Text>
 
             <TextInput
               style={styles.input}
@@ -119,8 +176,10 @@ export default function HivesScreen() {
               multiline
             />
 
-            <TouchableOpacity style={styles.saveButton} onPress={addHive}>
-              <Text style={styles.saveButtonText}>Αποθήκευση</Text>
+            <TouchableOpacity style={styles.saveButton} onPress={saveHive}>
+              <Text style={styles.saveButtonText}>
+                {editingHive ? 'Αποθήκευση Αλλαγών' : 'Αποθήκευση'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.cancelButton} onPress={() => setModalVisible(false)}>
@@ -193,6 +252,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#888',
     marginTop: 3,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#FFF3E0',
+  },
+  editButtonText: {
+    fontSize: 20,
+  },
+  deleteButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#FFEBEE',
+  },
+  deleteButtonText: {
+    fontSize: 20,
   },
   label: {
     fontSize: 16,

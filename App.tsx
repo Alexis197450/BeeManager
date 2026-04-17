@@ -6,6 +6,7 @@ import HivesScreen from './screens/HivesScreen';
 import QueenScreen from './screens/QueenScreen';
 import FinanceScreen from './screens/FinanceScreen';
 import ApiariesScreen from './screens/ApiariesScreen';
+import InspectionScreen from './screens/InspectionScreen';
 
 const Stack = createStackNavigator();
 
@@ -24,6 +25,7 @@ export default function App() {
         <Stack.Screen name="Queen" component={QueenScreen} options={{ title: '👑 Βασιλοτροφία' }} />
         <Stack.Screen name="Finance" component={FinanceScreen} options={{ title: '💰 Οικονομικά' }} />
         <Stack.Screen name="Apiaries" component={ApiariesScreen} options={{ title: '📍 Μελισσοκομεία' }} />
+        <Stack.Screen name="Inspection" component={InspectionScreen} options={{ title: '🔍 Επιθεώρηση' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

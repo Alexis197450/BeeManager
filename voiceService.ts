@@ -2,7 +2,7 @@ import { Audio } from 'expo-av';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
-  apiKey: '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',
+  apiKey: process.env.EXPO_PUBLIC_OPENAI_KEY,
   dangerouslyAllowBrowser: true,
 });
 

@@ -20,12 +20,12 @@ import { dashboardService, productsService } from '../../services/financeService
 
 // ─── CATEGORY INFO ────────────────────────────────────────────────────────
 const CATEGORY_INFO: Record<string, { label: string; emoji: string; color: string }> = {
-  honey:       { label: 'Μέλι',              emoji: '🍯', color: '#F5A623' },
-  propolis:    { label: 'Πρόπολη',           emoji: '🟫', color: '#8B5E3C' },
-  pollen:      { label: 'Γύρη',              emoji: '🌼', color: '#F9D342' },
-  royal_jelly: { label: 'Βασιλικός Πολτός',  emoji: '👑', color: '#A86EAF' },
-  wax:         { label: 'Κερί',              emoji: '🕯️', color: '#E8C84A' },
-  other:       { label: 'Άλλο',              emoji: '📦', color: '#7F8C8D' },
+  'Μέλι':             { label: 'Μέλι',             emoji: '🍯', color: '#F5A623' },
+  'Πρόπολη':          { label: 'Πρόπολη',          emoji: '🟫', color: '#8B5E3C' },
+  'Γύρη':             { label: 'Γύρη',             emoji: '🌼', color: '#F9D342' },
+  'Βασιλικός Πολτός': { label: 'Βασιλικός Πολτός', emoji: '👑', color: '#A86EAF' },
+  'Κερί':             { label: 'Κερί',             emoji: '🕯️', color: '#E8C84A' },
+  'Άλλο':             { label: 'Άλλο',             emoji: '📦', color: '#7F8C8D' },
 };
 
 export default function FinanceScreen() {

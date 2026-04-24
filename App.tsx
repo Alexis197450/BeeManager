@@ -21,6 +21,9 @@ import ListeningScreen from './app/screens/ListeningScreen';
 // Finance Screens
 import FinanceScreen from './app/screens/finance/FinanceScreen';
 import CreateProductScreen from './app/screens/finance/CreateProductScreen';
+import AddProductionScreen from './app/screens/finance/AddProductionScreen';
+import AddSaleScreen from './app/screens/finance/AddSaleScreen';
+
 
 // ─── TYPE DEFINITIONS ─────────────────────────────────────────────────────
 export type RootStackParamList = {
@@ -84,8 +87,7 @@ function AppNavigator() {
 
 <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: '💸 Έξοδα' }} />
 <Stack.Screen name="AddAsset" component={AddAssetScreen} options={{ title: '🏭 Πάγια' }} />
-<Stack.Screen name="AddProduction" component={PlaceholderScreen} options={{ title: '📈 Νέα Παραγωγή' }} />
-<Stack.Screen name="AddSale" component={PlaceholderScreen} options={{ title: '💳 Νέα Πώληση' }} />
+<Stack.Screen name="AddSale" component={AddSaleScreen} options={{ headerShown: false }} />
 
           <Stack.Screen name="Inspection" component={InspectionScreen} options={{ title: '🔍 Επιθεώρηση' }} />
           <Stack.Screen name="Listening" component={ListeningScreen} options={{ headerShown: false }} />

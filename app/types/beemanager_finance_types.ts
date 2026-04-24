@@ -218,28 +218,38 @@ export interface Sale {
   id: string;
   user_id: string;
   product_id: string;
-  
-  year: number;
-  quantity_sold: number;
-  custom_sale_price: number;
-  total_revenue: number;
-  
-  date: string;
-  notes?: string;
-  
+  packaging_id?: string | null;
+
+  quantity: number;
+  unit_price: number;
+  total_amount: number;
+
+  sale_type: 'retail' | 'wholesale';
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+
+  sale_date: string;
+  notes?: string | null;
+
   created_at: string;
   updated_at: string;
 }
 
 export interface CreateSaleInput {
   product_id: string;
-  year: number;
-  quantity_sold: number;
-  custom_sale_price: number;
-  date: string;
-  notes?: string;
+  packaging_id?: string | null;
+  quantity: number;
+  unit_price: number;
+  sale_type: 'retail' | 'wholesale';
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+  sale_date: string;
+  notes?: string | null;
 }
-
 // ─────────────────────────────────────────────────────────────────────
 // 7. REVENUE MIX ESTIMATE
 // ─────────────────────────────────────────────────────────────────────

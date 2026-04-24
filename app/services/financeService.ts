@@ -531,8 +531,9 @@ export const salesService = {
       .from('sales')
       .select('*')
       .eq('product_id', productId)
-      .eq('year', year)
-      .order('date', { ascending: false });
+      .gte('sale_date', `${year}-01-01`)
+      .lte('sale_date', `${year}-12-31`)
+      .order('sale_date', { ascending: false });
 
     if (error) throw error;
     return data || [];
@@ -540,12 +541,12 @@ export const salesService = {
 
   async getTotalByProduct(productId: string, year: number): Promise<number> {
     const sales = await this.getByProduct(productId, year);
-    return sales.reduce((sum, s) => sum + (s.quantity_sold || 0), 0);
+    return sales.reduce((sum, s) => sum + (s.quantity || 0), 0);
   },
 
   async getTotalRevenueByProduct(productId: string, year: number): Promise<number> {
     const sales = await this.getByProduct(productId, year);
-    return sales.reduce((sum, s) => sum + (s.total_revenue || 0), 0);
+    return sales.reduce((sum, s) => sum + (s.total_amount || s.quantity * s.unit_price || 0), 0);
   },
 
   async getByYear(userId: string, year: number): Promise<Sale[]> {
@@ -553,17 +554,16 @@ export const salesService = {
       .from('sales')
       .select('*')
       .eq('user_id', userId)
-      .eq('year', year)
-      .order('date', { ascending: false });
+      .gte('sale_date', `${year}-01-01`)
+      .lte('sale_date', `${year}-12-31`)
+      .order('sale_date', { ascending: false });
 
     if (error) throw error;
     return data || [];
   },
 
   async create(userId: string, input: any) {
-    if (!userId) {
-      throw new Error('User ID is required to create a sale');
-    }
+    if (!userId) throw new Error('User ID is required to create a sale');
 
     const { data, error } = await supabase
       .from('sales')
@@ -572,7 +572,7 @@ export const salesService = {
       .single();
 
     if (error) {
-      console.error("DEBUG -> Supabase Error:", error.message);
+      console.error('DEBUG -> Supabase Error:', error.message);
       throw error;
     }
     return data;
@@ -587,7 +587,6 @@ export const salesService = {
     if (error) throw error;
   },
 };
-
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║ 7. REVENUE MIX SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
@@ -634,24 +633,23 @@ export const revenueMixService = {
     if (error) throw error;
     return data;
   },
+async calculateActualMix(userId: string, year: number): Promise<Record<string, number>> {
+  const sales = await salesService.getByYear(userId, year);
 
-  async calculateActualMix(userId: string, year: number): Promise<Record<string, number>> {
-    const sales = await salesService.getByYear(userId, year);
+  const totalRevenue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
 
-    const totalRevenue = sales.reduce((sum, s) => sum + (s.total_revenue || 0), 0);
+  if (totalRevenue === 0) return {};
 
-    if (totalRevenue === 0) return {};
+  const mix: Record<string, number> = {};
 
-    const mix: Record<string, number> = {};
+  sales.forEach((sale) => {
+    if (!mix[sale.product_id]) {
+      mix[sale.product_id] = 0;
+    }
+    mix[sale.product_id] += (sale.total_amount || 0) / totalRevenue;
+  });
 
-    sales.forEach((sale) => {
-      if (!mix[sale.product_id]) {
-        mix[sale.product_id] = 0;
-      }
-      mix[sale.product_id] += (sale.total_revenue || 0) / totalRevenue;
-    });
-
-    return mix;
+  return mix;
   },
 
   async getMixPercentage(userId: string, year: number, productId: string): Promise<number> {

@@ -3,8 +3,8 @@
 
 import { useCallback } from 'react';
 import { AppState } from 'react-native';
-import { supabase } from '../supabase';
-import { useAuth } from '../AuthContext';
+import { supabase } from '../app/supabase';
+import { useAuth } from '../app/contexts/AuthContext';
 
 const LOCK_TIMEOUT_MS = 30 * 60 * 1000; // 30 λεπτά
 

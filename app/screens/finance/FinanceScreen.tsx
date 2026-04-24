@@ -1,631 +1,402 @@
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║                    Finance Screen (Main Dashboard)                 ║
-// ║                    Activity-Based Costing View                    ║
-// ║                         FIXED VERSION                              ║
+// ║                     FinanceScreen.tsx                             ║
+// ║              Σύνοψη Οικονομικών - BeeManager                      ║
 // ╚════════════════════════════════════════════════════════════════════╝
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
-  ScrollView,
   Text,
   StyleSheet,
+  ScrollView,
   TouchableOpacity,
+  RefreshControl,
   ActivityIndicator,
   Alert,
-  Dimensions,
 } from 'react-native';
-import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../../contexts/AuthContext';
+import { dashboardService, productsService } from '../../services/financeService';
 
-// ⚠️ TEMPORARY IMPORTS - Will be available after integration
-// import { useAuth } from '../contexts/AuthContext';
-// import { costingService, dashboardService, ... } from '../services/financeService';
-// import { CostBreakdown, Product } from '../types/beemanager_finance_types';
+// ─── CATEGORY INFO ────────────────────────────────────────────────────────
+const CATEGORY_INFO: Record<string, { label: string; emoji: string; color: string }> = {
+  honey:       { label: 'Μέλι',              emoji: '🍯', color: '#F5A623' },
+  propolis:    { label: 'Πρόπολη',           emoji: '🟫', color: '#8B5E3C' },
+  pollen:      { label: 'Γύρη',              emoji: '🌼', color: '#F9D342' },
+  royal_jelly: { label: 'Βασιλικός Πολτός',  emoji: '👑', color: '#A86EAF' },
+  wax:         { label: 'Κερί',              emoji: '🕯️', color: '#E8C84A' },
+  other:       { label: 'Άλλο',              emoji: '📦', color: '#7F8C8D' },
+};
 
-// For now: Mock imports to avoid errors
-const useAuth = () => ({ user: { id: 'user-123' } });
-
-// Type definitions (inline for now)
-interface Product {
-  id: string;
-  user_id: string;
-  name: string;
-  unit_type: 'kg' | 'liters' | 'pieces' | 'gr';
-  is_active: boolean;
-}
-
-interface CostBreakdown {
-  productId: string;
-  productName: string;
-  quantityProduced: number;
-  unit: string;
-  summary: {
-    unitCost: number;
-    quantitySold: number;
-    totalRevenue: number;
-  };
-}
-
-interface DashboardState {
-  year: number;
-  selectedProductId?: string;
-  isLoading: boolean;
-  error?: string;
-  summary?: any;
-  products: Product[];
-}
-
-const { width } = Dimensions.get('window');
-
-// ─────────────────────────────────────────────────────────────────────
-// MAIN COMPONENT
-// ─────────────────────────────────────────────────────────────────────
-
-const FinanceScreen = () => {
-  const { user } = useAuth();
+export default function FinanceScreen() {
   const navigation = useNavigation<any>();
-  const route = useRoute();
+  const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'expenses' | 'assets' | 'production' | 'sales'>('overview');
-  const [state, setState] = useState<DashboardState>({
-    year: new Date().getFullYear(),
-    isLoading: false, // Set to false for now
-    products: [
-      // Mock data for UI testing
-      {
-        id: '1',
-        user_id: 'user-123',
-        name: 'Μέλι Ανθέων',
-        unit_type: 'kg',
-        is_active: true,
-      },
-      {
-        id: '2',
-        user_id: 'user-123',
-        name: 'Μέλι Θυμαριού',
-        unit_type: 'kg',
-        is_active: true,
-      },
-    ],
-  });
-  const [desiredMarginPct, setDesiredMarginPct] = useState(30);
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+  const [summary, setSummary] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
-  // ──────────────────────────────────────────────────────────────────
-  // Render: Empty State
-  // ──────────────────────────────────────────────────────────────────
+  // ─── LOAD DATA ──────────────────────────────────────────────────────────
+  const loadData = useCallback(async (showRefresh = false) => {
+    if (!user?.id) return;
+    if (showRefresh) setIsRefreshing(true);
+    else setIsLoading(true);
 
-  if (state.isLoading) {
+    try {
+      const data = await dashboardService.getSummaryForYear(user.id, year);
+      setSummary(data);
+    } catch (error: any) {
+      Alert.alert('Σφάλμα', 'Αδυναμία φόρτωσης δεδομένων.');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [user?.id, year]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // ─── GROUP PRODUCTS BY CATEGORY ─────────────────────────────────────────
+  const groupedProducts = React.useMemo(() => {
+    if (!summary?.products) return {};
+    return summary.products.reduce((acc: any, p: any) => {
+      const cat = p.category || 'other';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(p);
+      return acc;
+    }, {});
+  }, [summary]);
+
+  const fmt = (n: number) =>
+    n.toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // ─── LOADING ────────────────────────────────────────────────────────────
+  if (isLoading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#4CAF50" />
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#F5A623" />
         <Text style={styles.loadingText}>Φόρτωση δεδομένων...</Text>
       </View>
     );
   }
 
-  if (state.products.length === 0) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.emptyState}>
-          <MaterialCommunityIcons name="package-variant" size={64} color="#999" />
-          <Text style={styles.emptyTitle}>Δεν έχετε προϊόντα ακόμα</Text>
-          <Text style={styles.emptySubtitle}>Δημιουργήστε το πρώτο σας προϊόν για να ξεκινήσετε</Text>
+  const totals = summary?.totals || {};
+  const expenseTotal = summary?.expenseSummary?.grandTotal || 0;
+  const profit = (totals.revenue || 0) - expenseTotal;
+  const isProfit = profit >= 0;
+
+  return (
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} tintColor="#F5A623" />
+      }
+    >
+      {/* ── YEAR SELECTOR ── */}
+      <View style={styles.yearBar}>
+        <TouchableOpacity onPress={() => setYear(y => y - 1)} style={styles.chevron}>
+          <Text style={styles.chevronText}>‹</Text>
+        </TouchableOpacity>
+        <Text style={styles.yearText}>📅 {year}</Text>
+        <TouchableOpacity
+          onPress={() => setYear(y => y + 1)}
+          style={styles.chevron}
+          disabled={year >= currentYear}
+        >
+          <Text style={[styles.chevronText, year >= currentYear && { opacity: 0.3 }]}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── SUMMARY CARDS ── */}
+      <View style={styles.cardsRow}>
+  <View style={[styles.card, styles.cardBlue]}>
+    <Text style={styles.cardEmoji}>💶</Text>
+    <Text style={styles.cardLabel}>Πωλήσεις</Text>
+    <Text style={styles.cardValue}>€{fmt(totals.revenue || 0)}</Text>
+  </View>
+  <View style={[styles.card, styles.cardRed]}>
+    <Text style={styles.cardEmoji}>💸</Text>
+    <Text style={styles.cardLabel}>Έξοδα</Text>
+    <Text style={styles.cardValue}>€{fmt(expenseTotal)}</Text>
+  </View>
+</View>
+      <View style={[styles.profitCard, isProfit ? styles.profitGreen : styles.profitRed]}>
+        <Text style={styles.profitLabel}>{isProfit ? '📈 Καθαρό Κέρδος' : '📉 Ζημία'}</Text>
+        <Text style={styles.profitValue}>€{fmt(Math.abs(profit))}</Text>
+        {totals.revenue > 0 && (
+          <Text style={styles.profitMargin}>
+            Περιθώριο: {fmt(totals.marginPct || 0)}%
+          </Text>
+        )}
+      </View>
+
+      {/* ── ΚΑΤΗΓΟΡΙΕΣ ── */}
+      <Text style={styles.sectionTitle}>Ανά Κατηγορία Προϊόντος</Text>
+
+      {Object.keys(groupedProducts).length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyEmoji}>📦</Text>
+          <Text style={styles.emptyText}>Δεν υπάρχουν προϊόντα για το {year}</Text>
           <TouchableOpacity
-            style={styles.createButton}
+            style={styles.addBtn}
             onPress={() => navigation.navigate('CreateProduct')}
           >
-            <MaterialCommunityIcons name="plus" size={20} color="#fff" />
-            <Text style={styles.createButtonText}>Νέο Προϊόν</Text>
+            <Text style={styles.addBtnText}>+ Νέο Προϊόν</Text>
           </TouchableOpacity>
+        </View>
+        
+      ) : (
+        Object.entries(groupedProducts).map(([cat, products]: any) => {
+          const info = CATEGORY_INFO[cat] || CATEGORY_INFO.other;
+          const catRevenue = products.reduce(
+            (s: number, p: any) => s + (p.breakdown?.summary?.totalRevenue || 0), 0
+          );
+          const catCost = products.reduce(
+            (s: number, p: any) => s + (p.breakdown?.summary?.totalCost || 0), 0
+          );
+          const catProfit = catRevenue - catCost;
+          const isExpanded = expandedCategory === cat;
+
+          return (
+            <View key={cat} style={styles.categoryCard}>
+              {/* Header */}
+              <TouchableOpacity
+                style={styles.categoryHeader}
+                onPress={() => setExpandedCategory(isExpanded ? null : cat)}
+              >
+                <View style={styles.categoryLeft}>
+                  <View style={[styles.categoryDot, { backgroundColor: info.color }]} />
+                  <Text style={styles.categoryEmoji}>{info.emoji}</Text>
+                  <Text style={styles.categoryLabel}>{info.label}</Text>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{products.length}</Text>
+                  </View>
+                </View>
+                <View style={styles.categoryRight}>
+                  <Text style={[styles.categoryProfit, catProfit >= 0 ? styles.green : styles.red]}>
+                    {catProfit >= 0 ? '+' : ''}€{fmt(catProfit)}
+                  </Text>
+                  <Text style={styles.expandIcon}>{isExpanded ? '▲' : '▼'}</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Expanded Products */}
+              {isExpanded && (
+                <View style={styles.productList}>
+                  {products.map((p: any) => {
+                    const bd = p.breakdown?.summary || {};
+                    return (
+                      <View key={p.id} style={styles.productRow}>
+                        <View style={styles.productRowTop}>
+                          <Text style={styles.productName}>{p.name}</Text>
+                          <View style={styles.productRowActions}>
+                            <TouchableOpacity
+                              style={styles.productActionBtn}
+                              onPress={() => navigation.navigate('CreateProduct', { editProduct: p })}
+                            >
+                              <Text style={styles.editIcon}>✏️</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.productActionBtn}
+                              onPress={() =>
+                                Alert.alert(
+                                  '🗑️ Διαγραφή',
+                                  `Να διαγραφεί το "${p.name}";`,
+                                  [
+                                    { text: 'Ακύρωση', style: 'cancel' },
+                                    {
+                                      text: 'Διαγραφή',
+                                      style: 'destructive',
+                                      onPress: async () => {
+                                        try {
+                                          await productsService.delete(p.id);
+                                          loadData(true);
+                                        } catch {
+                                          Alert.alert('Σφάλμα', 'Αδυναμία διαγραφής.');
+                                        }
+                                      },
+                                    },
+                                  ]
+                                )
+                              }
+                            >
+                              <Text style={styles.deleteIcon}>🗑️</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        <View style={styles.productStats}>
+                          <Text style={styles.productStat}>💶 {fmt(bd.totalRevenue || 0)}</Text>
+                          <Text style={styles.productStat}>💸 {fmt(bd.totalCost || 0)}</Text>
+                          <Text style={[
+                            styles.productStat,
+                            (bd.totalRevenue - bd.totalCost) >= 0 ? styles.green : styles.red,
+                          ]}>
+                            📊 {fmt((bd.totalRevenue || 0) - (bd.totalCost || 0))}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          );
+        })
+      )}
+
+      {/* ── ACTION BUTTONS ── */}
+      <View style={styles.actionsSection}>
+        <Text style={styles.sectionTitle}>Ενέργειες</Text>
+        <View style={styles.actionsGrid}>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#F5A623' }]}
+            onPress={() => navigation.navigate('CreateProduct')}
+          >
+            <Text style={styles.actionEmoji}>📦</Text>
+            <Text style={styles.actionLabel}>Νέο Προϊόν</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#E74C3C' }]}
+            onPress={() => navigation.navigate('AddExpense', { year })}
+          >
+            <Text style={styles.actionEmoji}>💸</Text>
+            <Text style={styles.actionLabel}>Νέο Έξοδο</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#27AE60' }]}
+            onPress={() => navigation.navigate('AddProduction', { year })}
+          >
+            <Text style={styles.actionEmoji}>🍯</Text>
+            <Text style={styles.actionLabel}>Παραγωγή</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#2980B9' }]}
+            onPress={() => navigation.navigate('AddSale', { year })}
+          >
+            <Text style={styles.actionEmoji}>💳</Text>
+            <Text style={styles.actionLabel}>Νέα Πώληση</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+    style={[styles.actionBtn, { backgroundColor: '#8E44AD' }]}
+    onPress={() => navigation.navigate('AddAsset')}
+  >
+    <Text style={styles.actionEmoji}>🏭</Text>
+    <Text style={styles.actionLabel}>Πάγια</Text>
+  </TouchableOpacity>
         </View>
       </View>
-    );
-  }
 
-  // ──────────────────────────────────────────────────────────────────
-  // Render: Overview Tab
-  // ──────────────────────────────────────────────────────────────────
-
-  const renderOverviewTab = () => {
-    return (
-      <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
-        {/* Year Selector */}
-        <View style={styles.yearSelector}>
-          <TouchableOpacity
-            onPress={() => setState((prev) => ({ ...prev, year: prev.year - 1 }))}
-            style={styles.yearButton}
-          >
-            <MaterialCommunityIcons name="chevron-left" size={24} color="#4CAF50" />
-          </TouchableOpacity>
-          <Text style={styles.yearText}>{state.year}</Text>
-          <TouchableOpacity
-            onPress={() => setState((prev) => ({ ...prev, year: prev.year + 1 }))}
-            style={styles.yearButton}
-          >
-            <MaterialCommunityIcons name="chevron-right" size={24} color="#4CAF50" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Summary Cards */}
-        <View style={styles.summaryGrid}>
-          <View style={styles.summaryCard}>
-            <MaterialCommunityIcons name="cash-minus" size={32} color="#FF6B6B" />
-            <Text style={styles.summaryLabel}>Συνολικά Έξοδα</Text>
-            <Text style={styles.summaryValue}>€0.00</Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <MaterialCommunityIcons name="cash-plus" size={32} color="#51CF66" />
-            <Text style={styles.summaryLabel}>Συνολικά Έσοδα</Text>
-            <Text style={styles.summaryValue}>€0.00</Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <MaterialCommunityIcons name="trending-up" size={32} color="#4CAF50" />
-            <Text style={styles.summaryLabel}>Κέρδος</Text>
-            <Text style={styles.summaryValue}>€0.00</Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <MaterialCommunityIcons name="percent" size={32} color="#FFD93D" />
-            <Text style={styles.summaryLabel}>Περιθώριο</Text>
-            <Text style={styles.summaryValue}>0.0%</Text>
-          </View>
-        </View>
-
-        {/* Products */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🐝 Προϊόντα μου</Text>
-          {state.products.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </View>
-
-        {/* Info Box */}
-        <InfoBox
-          title="ℹ️ Σημαντικό"
-          content="Αυτή η ενότητα θα δείξει την ανάλυση κόστους του κάθε προϊόντος με Activity-Based Costing (ABC)."
-        />
-
-        <View style={styles.spacer} />
-      </ScrollView>
-    );
-  };
-
-  // ──────────────────────────────────────────────────────────────────
-  // Render: Expenses Tab
-  // ──────────────────────────────────────────────────────────────────
-
-  const renderExpensesTab = () => (
-    <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>💰 Έξοδα Παραγωγής {state.year}</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => navigation.navigate('AddExpense', { year: state.year })}
-          >
-            <MaterialCommunityIcons name="plus" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <QuickExpenseButton
-          label="Γρήγορο Έξοδο"
-          icon="receipt"
-          onPress={() => Alert.alert('Todo', 'QuickExpense screen να δημιουργηθεί')}
-        />
-      </View>
-
-      <View style={styles.spacer} />
+      <View style={{ height: 32 }} />
     </ScrollView>
   );
-
-  // ──────────────────────────────────────────────────────────────────
-  // Render: Assets Tab
-  // ──────────────────────────────────────────────────────────────────
-
-  const renderAssetsTab = () => (
-    <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🏭 Πάγια Περιουσιακά</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => navigation.navigate('AddAsset')}
-          >
-            <MaterialCommunityIcons name="plus" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <InfoBox
-          title="Πάγια Περιουσιακά"
-          content="Προσθέστε τον εξοπλισμό σας εδώ. Το κόστος αποσβέσεως θα υπολογίζεται αυτόματα."
-        />
-      </View>
-
-      <View style={styles.spacer} />
-    </ScrollView>
-  );
-
-  // ──────────────────────────────────────────────────────────────────
-  // Render: Production Tab
-  // ──────────────────────────────────────────────────────────────────
-
-  const renderProductionTab = () => (
-    <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>📈 Παραγωγή {state.year}</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => navigation.navigate('AddProduction', { year: state.year })}
-          >
-            <MaterialCommunityIcons name="plus" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <InfoBox
-          title="Παραγωγή"
-          content="Καταχωρήστε τις ποσότητες που παράγατε για κάθε προϊόν."
-        />
-      </View>
-
-      <View style={styles.spacer} />
-    </ScrollView>
-  );
-
-  // ──────────────────────────────────────────────────────────────────
-  // Render: Sales Tab
-  // ──────────────────────────────────────────────────────────────────
-
-  const renderSalesTab = () => (
-    <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>💳 Πωλήσεις {state.year}</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => navigation.navigate('AddSale', { year: state.year })}
-          >
-            <MaterialCommunityIcons name="plus" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <InfoBox
-          title="Πωλήσεις"
-          content="Καταχωρήστε τις πωλήσεις σας με custom τιμή. Θα δείτε τις προτεινόμενες τιμές με βάση το επιθυμητό κέρδος."
-        />
-      </View>
-
-      <View style={styles.spacer} />
-    </ScrollView>
-  );
-
-  // ──────────────────────────────────────────────────────────────────
-  // Main Render
-  // ──────────────────────────────────────────────────────────────────
-
-  return (
-    <View style={styles.container}>
-      {/* Tab Navigation */}
-      <View style={styles.tabBar}>
-        {['overview', 'expenses', 'assets', 'production', 'sales'].map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[
-              styles.tab,
-              activeTab === tab && styles.tabActive,
-            ]}
-            onPress={() => setActiveTab(tab as any)}
-          >
-            <Text
-              style={[
-                styles.tabLabel,
-                activeTab === tab && styles.tabLabelActive,
-              ]}
-            >
-              {getTabLabel(tab)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Tab Content */}
-      {activeTab === 'overview' && renderOverviewTab()}
-      {activeTab === 'expenses' && renderExpensesTab()}
-      {activeTab === 'assets' && renderAssetsTab()}
-      {activeTab === 'production' && renderProductionTab()}
-      {activeTab === 'sales' && renderSalesTab()}
-    </View>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────
-// Helper Components
-// ─────────────────────────────────────────────────────────────────────
-
-function getTabLabel(tab: string): string {
-  const labels: Record<string, string> = {
-    overview: '📊 Σύνοψη',
-    expenses: '💰 Έξοδα',
-    assets: '🏭 Πάγια',
-    production: '📈 Παραγ.',
-    sales: '💳 Πωλήσεις',
-  };
-  return labels[tab] || tab;
 }
 
-interface ProductCardProps {
-  product: Product;
-}
-
-function ProductCard({ product }: ProductCardProps) {
-  return (
-    <View style={styles.productCard}>
-      <Text style={styles.productCardName}>{product.name}</Text>
-      <Text style={styles.productCardUnit}>Μονάδα: {product.unit_type}</Text>
-    </View>
-  );
-}
-
-interface InfoBoxProps {
-  title: string;
-  content: string;
-}
-
-function InfoBox({ title, content }: InfoBoxProps) {
-  return (
-    <View style={styles.infoBox}>
-      <Text style={styles.infoBoxTitle}>{title}</Text>
-      <Text style={styles.infoBoxContent}>{content}</Text>
-    </View>
-  );
-}
-
-interface QuickExpenseButtonProps {
-  label: string;
-  icon: string;
-  onPress: () => void;
-}
-
-function QuickExpenseButton({ label, icon, onPress }: QuickExpenseButtonProps) {
-  return (
-    <TouchableOpacity style={styles.quickExpenseButton} onPress={onPress}>
-      <MaterialCommunityIcons name={icon as any} size={24} color="#4CAF50" />
-      <Text style={styles.quickExpenseLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────────
-
+// ─── STYLES ───────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-    color: '#333',
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  createButton: {
-    flexDirection: 'row',
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
+  container: { flex: 1, backgroundColor: '#FFF8E7' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8E7' },
+  loadingText: { marginTop: 12, color: '#888', fontSize: 14 },
 
-  // Tab Bar
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    paddingHorizontal: 8,
+  // Year Bar
+  yearBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 14, backgroundColor: '#fff',
+    borderBottomWidth: 1, borderBottomColor: '#F0E0B0',
   },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: '#4CAF50',
-  },
-  tabLabel: {
-    fontSize: 12,
-    color: '#999',
-    fontWeight: '500',
-  },
-  tabLabelActive: {
-    color: '#4CAF50',
-    fontWeight: '600',
-  },
+  chevron: { paddingHorizontal: 20 },
+  chevronText: { fontSize: 28, color: '#F5A623', fontWeight: '700' },
+  yearText: { fontSize: 18, fontWeight: '700', color: '#2C3E50', minWidth: 100, textAlign: 'center' },
 
-  // Tab Content
-  tabContent: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+  // Summary Cards
+  cardsRow: { flexDirection: 'row', padding: 12, gap: 10 },
+  card: {
+    flex: 1, borderRadius: 12, padding: 16, alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 6, elevation: 3,
   },
+  cardBlue: { backgroundColor: '#EAF4FB' },
+  cardRed: { backgroundColor: '#FDEDEC' },
+  cardEmoji: { fontSize: 22 },
+  cardLabel: { fontSize: 12, color: '#666', marginTop: 4 },
+  cardValue: { fontSize: 18, fontWeight: '700', color: '#2C3E50', marginTop: 2 },
 
-  // Year Selector
-  yearSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    borderRadius: 8,
+  // Profit Card
+  profitCard: {
+    marginHorizontal: 12, marginBottom: 12, borderRadius: 14, padding: 18,
+    alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
   },
-  yearButton: {
-    padding: 8,
-  },
-  yearText: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginHorizontal: 16,
-    color: '#333',
-  },
+  profitGreen: { backgroundColor: '#EAFAF1' },
+  profitRed: { backgroundColor: '#FDEDEC' },
+  profitLabel: { fontSize: 14, color: '#555', fontWeight: '600' },
+  profitValue: { fontSize: 28, fontWeight: '800', color: '#2C3E50', marginTop: 4 },
+  profitMargin: { fontSize: 12, color: '#888', marginTop: 4 },
 
-  // Summary Grid
-  summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16,
-    justifyContent: 'space-between',
-  },
-  summaryCard: {
-    width: '48%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  summaryLabel: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 8,
-    fontWeight: '500',
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-    marginTop: 4,
-  },
-
-  // Sections
-  section: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
+  // Section Title
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-  },
-  addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4CAF50',
-    justifyContent: 'center',
-    alignItems: 'center',
+    fontSize: 15, fontWeight: '700', color: '#2C3E50',
+    marginHorizontal: 12, marginTop: 16, marginBottom: 8,
   },
 
-  // Product Card
-  productCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
+  // Empty State
+  emptyBox: {
+    margin: 12, padding: 32, backgroundColor: '#fff', borderRadius: 14,
+    alignItems: 'center', borderWidth: 1, borderColor: '#F0E0B0', borderStyle: 'dashed',
   },
-  productCardName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+  emptyEmoji: { fontSize: 40, marginBottom: 8 },
+  emptyText: { color: '#888', fontSize: 14, marginBottom: 16 },
+  addBtn: {
+    backgroundColor: '#F5A623', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20,
   },
-  productCardUnit: {
-    fontSize: 12,
-    color: '#999',
-  },
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
-  // Quick Expense Button
-  quickExpenseButton: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#4CAF50',
-    borderStyle: 'dashed',
+  // Category Cards
+  categoryCard: {
+    marginHorizontal: 12, marginBottom: 10, backgroundColor: '#fff',
+    borderRadius: 12, overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
   },
-  quickExpenseLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4CAF50',
-    marginLeft: 12,
+  categoryHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14,
   },
+  categoryLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  categoryDot: { width: 10, height: 10, borderRadius: 5 },
+  categoryEmoji: { fontSize: 18 },
+  categoryLabel: { fontSize: 15, fontWeight: '600', color: '#2C3E50' },
+  badge: {
+    backgroundColor: '#F0E6D3', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2,
+  },
+  badgeText: { fontSize: 11, fontWeight: '700', color: '#8B5E3C' },
+  categoryRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  categoryProfit: { fontSize: 15, fontWeight: '700' },
+  expandIcon: { fontSize: 12, color: '#999' },
 
-  // Info Box
-  infoBox: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2196F3',
-    marginBottom: 20,
+  // Product List
+  productList: { borderTopWidth: 1, borderTopColor: '#F5F0E8', paddingBottom: 8 },
+  productRow: {
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#F9F5EE',
   },
-  infoBoxTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1976D2',
-    marginBottom: 8,
-  },
-  infoBoxContent: {
-    fontSize: 13,
-    color: '#1565C0',
-    lineHeight: 20,
-  },
+  productRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  productRowActions: { flexDirection: 'row', gap: 8 },
+  productActionBtn: { padding: 4 },
+  editIcon: { fontSize: 14 },
+  deleteIcon: { fontSize: 14 },
+  productName: { fontSize: 14, fontWeight: '600', color: '#2C3E50', flex: 1 },
+  productStats: { flexDirection: 'row', gap: 12 },
+  productStat: { fontSize: 12, color: '#666' },
 
-  // Spacer
-  spacer: {
-    height: 32,
+  // Colors
+  green: { color: '#27AE60' },
+  red: { color: '#E74C3C' },
+
+  // Actions
+  actionsSection: { marginTop: 8 },
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 10 },
+  actionBtn: {
+    width: '47%', borderRadius: 12, padding: 16, alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 3,
   },
+  actionEmoji: { fontSize: 26 },
+  actionLabel: { fontSize: 13, fontWeight: '700', color: '#fff', marginTop: 6 },
 });
-
-// ─────────────────────────────────────────────────────────────────────
-// DEFAULT EXPORT
-// ─────────────────────────────────────────────────────────────────────
-
-export default FinanceScreen;

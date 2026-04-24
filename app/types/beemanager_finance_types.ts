@@ -1,12 +1,40 @@
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║              BeeManager Finance Types                              ║
 // ║            Activity-Based Costing (ABC) - Full Types              ║
+// ║              UPDATED: Added ProductCategory                        ║
 // ╚════════════════════════════════════════════════════════════════════╝
 
 // ─────────────────────────────────────────────────────────────────────
-// 1. PRODUCTS
+// 1. PRODUCTS (με κατηγορίες)
 // ─────────────────────────────────────────────────────────────────────
-export type UnitType = 'kg' | 'liters' | 'pieces' | 'gr';
+export type UnitType = 'kg' | 'liters' | 'ml' | 'pieces' | 'gr';
+
+// ✅ NEW: Κατηγορίες προϊόντων μελισσοκομίας
+export type ProductCategory = 
+  | 'honey' 
+  | 'propolis' 
+  | 'pollen' 
+  | 'royal_jelly' 
+  | 'wax' 
+  | 'other';
+
+// ✅ NEW: Metadata για κάθε κατηγορία (auto unit selection)
+export const CATEGORY_INFO: Record<ProductCategory, {
+  label: string;
+  emoji: string;
+  defaultUnit: UnitType;
+}> = {
+  honey:       { label: 'Μέλι',             emoji: '🍯', defaultUnit: 'kg' },
+  propolis:    { label: 'Πρόπολη',          emoji: '🟫', defaultUnit: 'gr' },
+  pollen:      { label: 'Γύρη',             emoji: '🌼', defaultUnit: 'gr' },
+  royal_jelly: { label: 'Βασιλικός Πολτός', emoji: '👑', defaultUnit: 'gr' },
+  wax:         { label: 'Κερί',             emoji: '🕯️', defaultUnit: 'kg' },
+  other:       { label: 'Άλλο',             emoji: '📦', defaultUnit: 'kg' },
+};
+
+export const CATEGORY_LIST: ProductCategory[] = [
+  'honey', 'propolis', 'pollen', 'royal_jelly', 'wax', 'other',
+];
 
 export interface Product {
   id: string;
@@ -15,8 +43,9 @@ export interface Product {
   name: string;
   description?: string;
   
-  unit_type: UnitType;
-  density?: number; // 1.43 (μέλι), 1.10 (πρόπολη), etc.
+  category: ProductCategory;       // ✅ NEW
+  unit_type: UnitType;              // auto από κατηγορία
+  density?: number;
   
   is_active: boolean;
   created_at: string;
@@ -26,6 +55,7 @@ export interface Product {
 export interface CreateProductInput {
   name: string;
   description?: string;
+  category: ProductCategory;        // ✅ NEW
   unit_type: UnitType;
   density?: number;
 }
@@ -38,11 +68,11 @@ export interface PackagingPreset {
   user_id: string;
   product_id: string;
   
-  name: string; // "500ml βάζο", "1kg κουτί"
+  name: string;
   volume_ml?: number;
   weight_kg: number;
   
-  cost_per_unit: number; // €
+  cost_per_unit: number;
   is_default: boolean;
   
   created_at: string;
@@ -69,6 +99,16 @@ export type ExpenseType =
   | 'maintenance' 
   | 'other';
 
+export const EXPENSE_TYPE_INFO: Record<ExpenseType, { label: string; emoji: string }> = {
+  fuel:        { label: 'Καύσιμα',      emoji: '⛽' },
+  feed:        { label: 'Τροφή',        emoji: '🍯' },
+  labor:       { label: 'Εργατικά',     emoji: '👷' },
+  packaging:   { label: 'Συσκευασία',   emoji: '📦' },
+  chemicals:   { label: 'Χημικά',       emoji: '🧪' },
+  maintenance: { label: 'Συντήρηση',    emoji: '🔧' },
+  other:       { label: 'Άλλο',         emoji: '➕' },
+};
+
 export type AllocationTypeExpense = 'shared' | 'direct_to_product';
 
 export interface ExpenseProduction {
@@ -79,10 +119,10 @@ export interface ExpenseProduction {
   type: ExpenseType;
   
   allocation_type: AllocationTypeExpense;
-  product_id?: string; // nullable, only if direct_to_product
+  product_id?: string;
   
-  amount: number; // €
-  date: string; // YYYY-MM-DD
+  amount: number;
+  date: string;
   notes?: string;
   
   created_at: string;
@@ -99,7 +139,7 @@ export interface CreateExpenseInput {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 4. FIXED ASSETS (Πάγια Περιουσιακά)
+// 4. FIXED ASSETS
 // ─────────────────────────────────────────────────────────────────────
 export type AssetCategory = 'mechanical' | 'hives' | 'transport' | 'consumable';
 
@@ -113,20 +153,20 @@ export interface FixedAsset {
   description?: string;
   
   category: AssetCategory;
-  unit_cost: number; // €
+  unit_cost: number;
   quantity: number;
-  total_cost: number; // calculated
+  total_cost: number;
   
-  purchase_date: string; // YYYY-MM-DD
+  purchase_date: string;
   
-  depreciation_rate: number; // 10, 17.5, 13.5, 40 (%)
+  depreciation_rate: number;
   is_custom_rate: boolean;
   useful_life_years: number;
   
   allocation_type: AllocationTypeAsset;
-  product_id?: string; // nullable, only if direct_to_product
+  product_id?: string;
   
-  annual_depreciation: number; // calculated €
+  annual_depreciation: number;
   
   created_at: string;
 }
@@ -138,15 +178,13 @@ export interface CreateFixedAssetInput {
   unit_cost: number;
   quantity?: number;
   purchase_date: string;
-  
-  depreciation_rate?: number; // override default
-  
+  depreciation_rate?: number;
   allocation_type: AllocationTypeAsset;
   product_id?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 5. PRODUCTION LOGS (Παραγωγή)
+// 5. PRODUCTION LOGS
 // ─────────────────────────────────────────────────────────────────────
 export interface ProductionLog {
   id: string;
@@ -157,7 +195,7 @@ export interface ProductionLog {
   quantity_produced: number;
   unit: UnitType;
   
-  date: string; // YYYY-MM-DD
+  date: string;
   notes?: string;
   
   created_at: string;
@@ -174,7 +212,7 @@ export interface CreateProductionLogInput {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 6. SALES (Πωλήσεις)
+// 6. SALES
 // ─────────────────────────────────────────────────────────────────────
 export interface Sale {
   id: string;
@@ -183,10 +221,10 @@ export interface Sale {
   
   year: number;
   quantity_sold: number;
-  custom_sale_price: number; // € (user-defined)
-  total_revenue: number; // calculated
+  custom_sale_price: number;
+  total_revenue: number;
   
-  date: string; // YYYY-MM-DD
+  date: string;
   notes?: string;
   
   created_at: string;
@@ -211,7 +249,7 @@ export interface RevenueMixEstimate {
   product_id: string;
   
   year: number;
-  estimated_percentage: number; // 0-100
+  estimated_percentage: number;
   
   created_at: string;
   updated_at: string;
@@ -224,7 +262,7 @@ export interface CreateRevenueMixEstimateInput {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 8. FINANCE SUMMARY (Calculated Results)
+// 8. FINANCE SUMMARY
 // ─────────────────────────────────────────────────────────────────────
 export interface FinanceSummary {
   id: string;
@@ -232,34 +270,27 @@ export interface FinanceSummary {
   product_id: string;
   year: number;
   
-  // Production
   total_quantity_produced: number;
   unit: UnitType;
   
-  // Direct Costs
   direct_expenses: number;
   direct_depreciation: number;
   direct_total: number;
   
-  // Shared Costs
-  revenue_mix_percentage: number; // 0-100
+  revenue_mix_percentage: number;
   shared_expenses_allocated: number;
   shared_depreciation_allocated: number;
   shared_total: number;
   
-  // Total
   total_cost: number;
-  unit_cost: number; // €/kg or €/L
+  unit_cost: number;
   
-  // Sales
   total_quantity_sold: number;
   total_revenue: number;
   
-  // Margins
   gross_profit: number;
   gross_margin_pct: number;
   
-  // Metadata
   calculation_type: 'actual' | 'estimated';
   calculated_at: string;
 }
@@ -270,7 +301,7 @@ export interface FinanceSummary {
 export interface DepreciationDefault {
   id: number;
   category: AssetCategory;
-  depreciation_rate: number; // %
+  depreciation_rate: number;
   useful_life_years: number;
   description: string;
   examples: string;
@@ -278,18 +309,16 @@ export interface DepreciationDefault {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 10. COST BREAKDOWN (for display)
+// 10. COST BREAKDOWN
 // ─────────────────────────────────────────────────────────────────────
 export interface CostBreakdown {
   productId: string;
   productName: string;
   year: number;
   
-  // Production
   quantityProduced: number;
   unit: UnitType;
   
-  // Costs
   directCosts: {
     expenses: number;
     depreciation: number;
@@ -322,10 +351,9 @@ export interface SuggestedPricing {
   
   suggestedPrice: number;
   withoutTax: number;
-  withTax: number; // +19% ΦΠΑ
+  withTax: number;
   
   breakdownNote: string;
-  // "Με 30% margin, η τιμή θα πρέπει να είναι τουλάχιστον 3,60€/kg"
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -334,12 +362,10 @@ export interface SuggestedPricing {
 export interface FinanceDashboardState {
   selectedYear: number;
   selectedProductId?: string;
-  desiredMarginPct: number; // for pricing calculator
+  desiredMarginPct: number;
   
-  // Filters
   showOnlyActiveProducts: boolean;
   
-  // Cached data
   products: Product[];
   expenses: ExpenseProduction[];
   assets: FixedAsset[];
@@ -347,20 +373,19 @@ export interface FinanceDashboardState {
   sales: Sale[];
   revenueMixEstimates: RevenueMixEstimate[];
   
-  // Loading
   isLoading: boolean;
   error?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 13. QUICK ENTRY (Fast expense logging)
+// 13. QUICK ENTRY
 // ─────────────────────────────────────────────────────────────────────
 export interface QuickExpenseEntry {
   type: ExpenseType;
   amount: number;
   date: string;
   notes?: string;
-  photoUri?: string; // από κιβώτιο
+  photoUri?: string;
   
   allocation_type: AllocationTypeExpense;
   product_id?: string;
@@ -386,7 +411,7 @@ export interface ExpenseSummaryByCategory {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 15. ASSET INVENTORY (for display)
+// 15. ASSET INVENTORY
 // ─────────────────────────────────────────────────────────────────────
 export interface AssetInventory {
   assets: FixedAsset[];
@@ -401,7 +426,6 @@ export interface AssetInventory {
   totalValue: number;
   totalAnnualDepreciation: number;
   
-  // By product allocation
   directToProducts: {
     productId: string;
     assets: FixedAsset[];

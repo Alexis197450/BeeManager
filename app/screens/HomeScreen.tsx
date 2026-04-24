@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { useAuth } from '../AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function HomeScreen({ navigation }: any) {
   const { signOut, user, fullName } = useAuth();

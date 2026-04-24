@@ -1,9 +1,10 @@
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║           Finance Service - Activity-Based Costing (ABC)           ║
 // ║                    Core Calculation Engine                         ║
+// ║                 FULL VERSION WITH PACKAGING                        ║
 // ╚════════════════════════════════════════════════════════════════════╝
 
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../supabase';
 import {
   Product,
   ExpenseProduction,
@@ -19,7 +20,7 @@ import {
   AssetInventory,
 } from '../types/beemanager_finance_types';
 
-const supabase = createClient(process.env.EXPO_PUBLIC_SUPABASE_URL!, process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!);
+
 
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║ 1. PRODUCTS SERVICE
@@ -50,13 +51,23 @@ export const productsService = {
   },
 
   async create(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required to create a product');
+    }
+
     const { data, error } = await supabase
       .from('products')
-      .insert([{ user_id: userId, ...input }])
+      .insert([{
+        user_id: userId,
+        ...input
+      }])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("DEBUG -> Supabase Error:", error.message);
+      throw error;
+    }
     return data;
   },
 
@@ -83,7 +94,106 @@ export const productsService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 2. EXPENSES SERVICE
+// ║ 2. PACKAGING SERVICE (NEW!)
+// ╚════════════════════════════════════════════════════════════════════╝
+
+export const packagingService = {
+  // Παίρνει όλες τις συσκευασίες ενός προϊόντος
+  async getByProduct(productId: string) {
+    const { data, error } = await supabase
+      .from('packaging_presets')
+      .select('*')
+      .eq('product_id', productId)
+      .order('is_default', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Παίρνει όλες τις συσκευασίες ενός χρήστη
+  async getAllByUser(userId: string) {
+    const { data, error } = await supabase
+      .from('packaging_presets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Δημιουργία μιας συσκευασίας
+  async create(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required to create a packaging');
+    }
+
+    const { data, error } = await supabase
+      .from('packaging_presets')
+      .insert([{ user_id: userId, ...input }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("DEBUG -> Supabase Error (packaging):", error.message);
+      throw error;
+    }
+    return data;
+  },
+
+  // Δημιουργία ΠΟΛΛΩΝ συσκευασιών ταυτόχρονα
+  async createMany(userId: string, inputs: any[]) {
+    if (!userId) {
+      throw new Error('User ID is required to create packagings');
+    }
+
+    if (!inputs || inputs.length === 0) return [];
+
+    const rows = inputs.map((input) => ({
+      user_id: userId,
+      ...input,
+    }));
+
+    const { data, error } = await supabase
+      .from('packaging_presets')
+      .insert(rows)
+      .select();
+
+    if (error) {
+      console.error("DEBUG -> Supabase Error (packaging bulk):", error.message);
+      throw error;
+    }
+    return data || [];
+  },
+
+  // Διαγραφή συσκευασίας
+  async delete(packagingId: string) {
+    const { error } = await supabase
+      .from('packaging_presets')
+      .delete()
+      .eq('id', packagingId);
+
+    if (error) throw error;
+  },
+
+  // Set as default
+  async setAsDefault(productId: string, packagingId: string) {
+    await supabase
+      .from('packaging_presets')
+      .update({ is_default: false })
+      .eq('product_id', productId);
+
+    const { error } = await supabase
+      .from('packaging_presets')
+      .update({ is_default: true })
+      .eq('id', packagingId);
+
+    if (error) throw error;
+  },
+};
+
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║ 3. EXPENSES SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const expensesService = {
@@ -126,13 +236,20 @@ export const expensesService = {
   },
 
   async create(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required to create an expense');
+    }
+
     const { data, error } = await supabase
       .from('expenses_production')
       .insert([{ user_id: userId, ...input }])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("DEBUG -> Supabase Error:", error.message);
+      throw error;
+    }
     return data;
   },
 
@@ -145,7 +262,6 @@ export const expensesService = {
     if (error) throw error;
   },
 
-  // Sum shared expenses for a year
   async sumSharedByYear(userId: string, year: number): Promise<number> {
     const { data, error } = await supabase
       .from('expenses_production')
@@ -158,7 +274,6 @@ export const expensesService = {
     return (data || []).reduce((sum, e) => sum + (e.amount || 0), 0);
   },
 
-  // Sum direct expenses for a product
   async sumDirectByProduct(productId: string, year: number): Promise<number> {
     const { data, error } = await supabase
       .from('expenses_production')
@@ -171,7 +286,6 @@ export const expensesService = {
     return (data || []).reduce((sum, e) => sum + (e.amount || 0), 0);
   },
 
-  // Summary by category
   async summaryByCategory(userId: string, year: number): Promise<ExpenseSummaryByCategory> {
     const expenses = await this.getByYear(userId, year);
     const assets = await assetsService.getByUser(userId);
@@ -190,10 +304,8 @@ export const expensesService = {
       grandTotal: 0,
     };
 
-    // Sum by type
     expenses.forEach((exp) => {
       if (exp.allocation_type === 'shared') {
-        // Only count shared in summary
         summary[exp.type as keyof typeof summary] =
           (summary[exp.type as keyof typeof summary] as number) + (exp.amount || 0);
       }
@@ -203,7 +315,6 @@ export const expensesService = {
       .filter((k) => k !== 'year' && k !== 'depreciation' && k !== 'grandTotal')
       .reduce((sum, key) => sum + (summary[key as keyof typeof summary] as number), 0);
 
-    // Add depreciation (shared only)
     const depreciation = assets
       .filter((a) => a.allocation_type === 'shared')
       .reduce((sum, a) => sum + (a.annual_depreciation || 0), 0);
@@ -216,7 +327,7 @@ export const expensesService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 3. FIXED ASSETS SERVICE (Depreciation)
+// ║ 4. FIXED ASSETS SERVICE (Depreciation)
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const assetsService = {
@@ -255,6 +366,10 @@ export const assetsService = {
   },
 
   async create(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required to create an asset');
+    }
+
     const { data: defaults } = await supabase
       .from('depreciation_defaults')
       .select('*')
@@ -264,20 +379,25 @@ export const assetsService = {
     const rate = input.depreciation_rate || defaults?.depreciation_rate || 10;
     const life = input.useful_life_years || defaults?.useful_life_years || 10;
 
-    const { data, error } = await supabase
-      .from('fixed_assets')
-      .insert([
-        {
-          user_id: userId,
-          ...input,
-          depreciation_rate: rate,
-          useful_life_years: life,
-        },
-      ])
+    const { total_cost, annual_depreciation, ...rest } = input;
+
+const { data, error } = await supabase
+  .from('fixed_assets')
+  .insert([
+    {
+      user_id: userId,
+      ...rest,
+      depreciation_rate: rate,
+      useful_life_years: life,
+    },
+  ])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("DEBUG -> Supabase Error:", error.message);
+      throw error;
+    }
     return data;
   },
 
@@ -290,7 +410,6 @@ export const assetsService = {
     if (error) throw error;
   },
 
-  // Sum direct depreciation for a product
   async sumDirectDepreciation(productId: string): Promise<number> {
     const { data, error } = await supabase
       .from('fixed_assets')
@@ -302,7 +421,6 @@ export const assetsService = {
     return (data || []).reduce((sum, a) => sum + (a.annual_depreciation || 0), 0);
   },
 
-  // Sum shared depreciation for a user
   async sumSharedDepreciation(userId: string): Promise<number> {
     const { data, error } = await supabase
       .from('fixed_assets')
@@ -314,7 +432,6 @@ export const assetsService = {
     return (data || []).reduce((sum, a) => sum + (a.annual_depreciation || 0), 0);
   },
 
-  // Get asset inventory
   async getInventory(userId: string): Promise<AssetInventory> {
     const assets = await this.getByUser(userId);
 
@@ -331,7 +448,6 @@ export const assetsService = {
       directToProducts: [],
     };
 
-    // Group by product (direct allocation)
     const grouped = assets
       .filter((a) => a.allocation_type === 'direct_to_product')
       .reduce(
@@ -356,7 +472,7 @@ export const assetsService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 4. PRODUCTION SERVICE
+// ║ 5. PRODUCTION SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const productionService = {
@@ -378,13 +494,20 @@ export const productionService = {
   },
 
   async create(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required to create a production log');
+    }
+
     const { data, error } = await supabase
       .from('production_logs')
       .insert([{ user_id: userId, ...input }])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("DEBUG -> Supabase Error:", error.message);
+      throw error;
+    }
     return data;
   },
 
@@ -399,7 +522,7 @@ export const productionService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 5. SALES SERVICE
+// ║ 6. SALES SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const salesService = {
@@ -438,13 +561,20 @@ export const salesService = {
   },
 
   async create(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required to create a sale');
+    }
+
     const { data, error } = await supabase
       .from('sales')
       .insert([{ user_id: userId, ...input }])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("DEBUG -> Supabase Error:", error.message);
+      throw error;
+    }
     return data;
   },
 
@@ -459,7 +589,7 @@ export const salesService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 6. REVENUE MIX SERVICE
+// ║ 7. REVENUE MIX SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const revenueMixService = {
@@ -488,6 +618,10 @@ export const revenueMixService = {
   },
 
   async upsert(userId: string, input: any) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
     const { data, error } = await supabase
       .from('revenue_mix_estimate')
       .upsert(
@@ -501,7 +635,6 @@ export const revenueMixService = {
     return data;
   },
 
-  // Calculate actual revenue mix from sales
   async calculateActualMix(userId: string, year: number): Promise<Record<string, number>> {
     const sales = await salesService.getByYear(userId, year);
 
@@ -521,7 +654,6 @@ export const revenueMixService = {
     return mix;
   },
 
-  // Get mix percentage (use actual if available, fallback to estimate)
   async getMixPercentage(userId: string, year: number, productId: string): Promise<number> {
     const actualMix = await this.calculateActualMix(userId, year);
 
@@ -535,43 +667,34 @@ export const revenueMixService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 7. CORE COSTING LOGIC (Activity-Based Costing)
+// ║ 8. CORE COSTING LOGIC (Activity-Based Costing)
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const costingService = {
-  // Calculate unit cost using ABC method
-  async calculateUnitCost(productId: string, year: number): Promise<number> {
+  async calculateUnitCost(userId: string, productId: string, year: number): Promise<number> {
     try {
+      if (!userId) throw new Error('User ID is required');
+
       const product = await productsService.getById(productId);
       if (!product) throw new Error('Product not found');
 
-      // 1. DIRECT COSTS (only for this product)
       const directExpenses = await expensesService.sumDirectByProduct(productId, year);
       const directDepreciation = await assetsService.sumDirectDepreciation(productId);
       const directTotal = directExpenses + directDepreciation;
 
-      // 2. SHARED COSTS (allocated by revenue mix)
-      const sharedExpenses = await expensesService.sumSharedByYear(
-        (await supabase.auth.getUser()).data.user?.id || '',
-        year
-      );
-      const sharedDepreciation = await assetsService.sumSharedDepreciation(
-        (await supabase.auth.getUser()).data.user?.id || ''
-      );
+      const sharedExpenses = await expensesService.sumSharedByYear(userId, year);
+      const sharedDepreciation = await assetsService.sumSharedDepreciation(userId);
 
-      const userId = (await supabase.auth.getUser()).data.user?.id || '';
       const mixPercentage = await revenueMixService.getMixPercentage(userId, year, productId);
       const mixFraction = mixPercentage / 100;
 
       const sharedTotal = (sharedExpenses + sharedDepreciation) * mixFraction;
 
-      // 3. TOTAL COST
       const totalCost = directTotal + sharedTotal;
 
-      // 4. PRODUCTION QUANTITY
       const production = await productionService.getTotalByProduct(productId, year);
 
-      if (production === 0) return 0; // No production
+      if (production === 0) return 0;
 
       return totalCost / production;
     } catch (error) {
@@ -580,29 +703,24 @@ export const costingService = {
     }
   },
 
-  // Get full cost breakdown
-  async getCostBreakdown(productId: string, year: number): Promise<CostBreakdown | null> {
+  async getCostBreakdown(userId: string, productId: string, year: number): Promise<CostBreakdown | null> {
     try {
+      if (!userId) throw new Error('User ID is required');
+
       const product = await productsService.getById(productId);
       if (!product) return null;
 
-      const userId = (await supabase.auth.getUser()).data.user?.id || '';
-
-      // Direct costs
       const directExpenses = await expensesService.sumDirectByProduct(productId, year);
       const directDepreciation = await assetsService.sumDirectDepreciation(productId);
 
-      // Shared costs
       const sharedExpenses = await expensesService.sumSharedByYear(userId, year);
       const sharedDepreciation = await assetsService.sumSharedDepreciation(userId);
       const mixPercentage = await revenueMixService.getMixPercentage(userId, year, productId);
 
-      // Production & Sales
       const production = await productionService.getTotalByProduct(productId, year);
       const quantitySold = await salesService.getTotalByProduct(productId, year);
       const totalRevenue = await salesService.getTotalRevenueByProduct(productId, year);
 
-      // Totals
       const directTotal = directExpenses + directDepreciation;
       const sharedTotal = (sharedExpenses + sharedDepreciation) * (mixPercentage / 100);
       const totalCost = directTotal + sharedTotal;
@@ -647,18 +765,17 @@ export const costingService = {
     }
   },
 
-  // Calculate suggested price
   async calculateSuggestedPrice(
+    userId: string,
     productId: string,
     year: number,
     desiredMarginPct: number
   ): Promise<SuggestedPricing> {
-    const unitCost = await this.calculateUnitCost(productId, year);
+    const unitCost = await this.calculateUnitCost(userId, productId, year);
 
-    // Price = Cost / (1 - Margin%)
     const marginFraction = desiredMarginPct / 100;
     const suggestedPrice = unitCost / (1 - marginFraction);
-    const withTax = suggestedPrice * 1.19; // +19% VAT
+    const withTax = suggestedPrice * 1.19;
 
     return {
       unitCost,
@@ -670,7 +787,6 @@ export const costingService = {
     };
   },
 
-  // What-if analysis: Show impact of discount
   calculateDiscountImpact(
     unitCost: number,
     originalPrice: number,
@@ -691,11 +807,13 @@ export const costingService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 8. DASHBOARD DATA
+// ║ 9. DASHBOARD DATA
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const dashboardService = {
   async getSummaryForYear(userId: string, year: number): Promise<any> {
+    if (!userId) throw new Error('User ID is required');
+
     const products = await productsService.getAll(userId);
     const expenseSummary = await expensesService.summaryByCategory(userId, year);
     const assetInventory = await assetsService.getInventory(userId);
@@ -703,7 +821,7 @@ export const dashboardService = {
     const breakdowns = await Promise.all(
       products.map(async (p) => ({
         ...p,
-        breakdown: await costingService.getCostBreakdown(p.id, year),
+        breakdown: await costingService.getCostBreakdown(userId, p.id, year),
       }))
     );
 

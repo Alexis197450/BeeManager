@@ -21,9 +21,9 @@ import {
   SpeechToTextLanguage,
 } from 'react-native-executorch';
 import { supabase } from '../supabase';
-import { useAuth } from '../AuthContext';
-import { useLock } from '../hooks/useLock';
-import { parseWakeWord, WakeWordCommand } from '../voiceService';
+import { useAuth } from '../contexts/AuthContext';
+import { useLock } from '../../hooks/useLock';
+import { parseWakeWord, WakeWordCommand } from '../services/voiceService';
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 

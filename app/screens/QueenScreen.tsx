@@ -8,7 +8,7 @@ import {
   TextInput, Alert, ActivityIndicator, Modal, FlatList, Keyboard,
 } from 'react-native';
 import { supabase } from '../supabase';
-import { useAuth } from '../AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 

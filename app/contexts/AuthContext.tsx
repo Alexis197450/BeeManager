@@ -4,7 +4,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Session, User } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { supabase } from '../supabase';
 
 interface AuthContextType {
   user: User | null;

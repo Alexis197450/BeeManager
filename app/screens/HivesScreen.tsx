@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Modal, TextInput, Alert, ScrollView } from 'react-native';
 import { supabase } from '../supabase';
-import { useLock } from '../hooks/useLock';
-import { useAuth } from '../AuthContext';
+import { useLock } from '../../hooks/useLock';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function HivesScreen({ navigation }: any) {
   const { user } = useAuth();

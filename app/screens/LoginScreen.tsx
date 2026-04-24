@@ -6,7 +6,7 @@ import {
   StyleSheet, ActivityIndicator, KeyboardAvoidingView,
   Platform, ScrollView,
 } from 'react-native';
-import { useAuth } from '../AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginScreen() {
   const { signIn, signUp } = useAuth();

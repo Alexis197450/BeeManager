@@ -8,8 +8,8 @@ import {
 } from 'react-native';
 import * as Speech from 'expo-speech';
 import { supabase } from '../supabase';
-import { voiceService } from '../voiceService';
-import { useLock } from '../hooks/useLock';
+import { voiceService } from '../services/voiceService';
+import { useLock } from '../../hooks/useLock';
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 

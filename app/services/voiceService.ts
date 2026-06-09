@@ -266,10 +266,10 @@ export function parseWakeWord(text: string): WakeWordCommand {
 
   if (t.includes('καθοδηγούμενη'))                          return { type: 'SELECT_MODE', mode: 'guided' };
   if (t.includes('ελεύθερη'))                               return { type: 'SELECT_MODE', mode: 'free' };
-  if (t.includes('πάμε') || t.includes('ξεκίνα'))           return { type: 'START_RECORDING' };
+  if (t.includes('πάμε') || t.includes('ξεκίνα') || t.includes('έτοιμος')) return { type: 'START_RECORDING' };
   if (t.includes('τέλος') || t.includes('σταμάτα εγγραφή')) return { type: 'STOP_RECORDING' };
-  if (t.includes('παύση') || t.includes('σταμάτα'))         return { type: 'PAUSE' };
-  if (t.includes('συνέχεια') || t.includes('συνέχισε'))     return { type: 'RESUME' };
+  if (t.includes('παύση') || t.includes('σταμάτα') || t.includes('stop'))  return { type: 'PAUSE' };
+  if (t.includes('συνέχεια') || t.includes('συνέχισε') || t.includes('έτοιμος')) return { type: 'RESUME' };
   if (t.includes('επανάλαβε') || t.includes('επανάληψη'))   return { type: 'REPEAT' };
   if (t.includes('διόρθωση') || t.includes('λάθος'))        return { type: 'CORRECTION' };
   if (t.includes('αποθήκευση') || t.includes('σώσε'))       return { type: 'SAVE' };

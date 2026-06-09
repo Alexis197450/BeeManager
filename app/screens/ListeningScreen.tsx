@@ -332,7 +332,7 @@ export default function ListeningScreen({ navigation, route }: Props) {
       case 'PAUSE': {
         pausedRef.current = true;
         setIsPaused(true);
-        speak('Σε παύση. Πες "Συνέχεια" για να προχωρήσεις.');
+        speak('Σε παύση. Πες "Συνέχεια" ή "Έτοιμος" για να προχωρήσεις.');
         addLog('⏸️ Παύση');
         return { state: currentState, hive: currentHive };
       }
@@ -346,7 +346,7 @@ export default function ListeningScreen({ navigation, route }: Props) {
       }
 
       case 'HELP': {
-        speak('Πες: Κυψέλη και τον αριθμό. Μετά: Καθοδηγούμενη ή Ελεύθερη. Για παύση πες: Παύση.');
+        speak('Πες: Κυψέλη και τον αριθμό. Μετά: Καθοδηγούμενη ή Ελεύθερη. Για παύση πες: Παύση ή Stop.');
         addLog('ℹ️ Βοήθεια');
         return { state: currentState, hive: currentHive };
       }
@@ -485,8 +485,8 @@ export default function ListeningScreen({ navigation, route }: Props) {
             { cmd: '"Κυψέλη [αριθμός]"', desc: 'Επιλογή κυψέλης' },
             { cmd: '"Καθοδηγούμενη"',    desc: 'Guided επιθεώρηση' },
             { cmd: '"Ελεύθερη"',         desc: 'Free επιθεώρηση' },
-            { cmd: '"Παύση"',            desc: 'Διακοπή ακρόασης' },
-            { cmd: '"Συνέχεια"',         desc: 'Επανεκκίνηση' },
+            { cmd: '"Παύση" ή "Stop"',   desc: 'Διακοπή ακρόασης' },
+            { cmd: '"Συνέχεια" ή "Έτοιμος"', desc: 'Επανεκκίνηση' },
             { cmd: '"Βοήθεια"',          desc: 'Εντολές' },
           ].map((item, i) => (
             <View key={i} style={styles.cmdRow}>

@@ -383,10 +383,10 @@ React.useEffect(() => {
 
   const handleCmd = useCallback((text: string): boolean => {
     const t = text.toLowerCase().trim();
-    if (t.includes('παύση') || t.includes('σταμάτα')) {
+    if (t.includes('παύση') || t.includes('σταμάτα') || t.includes('stop')) {
       setIsPaused(true); Speech.stop(); return true;
     }
-    if (t.includes('συνέχεια') || t.includes('πάμε')) {
+    if (t.includes('συνέχεια') || t.includes('πάμε') || t.includes('έτοιμος')) {
       setIsPaused(false); return true;
     }
     if (t.includes('επανάληψη') || t.includes('τι είπες')) {

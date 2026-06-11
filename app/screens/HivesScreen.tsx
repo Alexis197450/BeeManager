@@ -118,9 +118,10 @@ export default function HivesScreen({ navigation }: any) {
     }
     // Αλλιώς πήγαινε στην επιθεώρηση
     navigation.navigate('Inspection', {
-      hive_id: item.id,
-      hive_name: item.name,
-    });
+  hive_id: item.id,
+  hive_name: item.name,
+  mode: 'guided',
+});
   }
 
   const isClassic = newHiveBroodBox === 'Κλασσική Langstroth' || newHiveBroodBox === 'Κλασσική Dadant';

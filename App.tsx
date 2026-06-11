@@ -29,7 +29,7 @@ export type RootStackParamList = {
   Hives: undefined;
   Queen: undefined;
   Apiaries: undefined;
-  Inspection: { hive_id: string; hive_name: string; mode: 'guided' | 'free' };
+  Inspection: { hive_id: string; hive_name: string; mode?: 'guided' | 'free' };
   Finance: undefined;
   CreateProduct: undefined;
   AddExpense: { year: number };
@@ -74,7 +74,6 @@ function AppNavigator() {
           <Stack.Screen name="Queen" component={QueenScreen} options={{ title: '👑 Βασιλοτροφία' }} />
           <Stack.Screen name="Finance" component={FinanceScreen} options={{ title: '💰 Οικονομικά' }} />
           <Stack.Screen name="CreateProduct" component={CreateProductScreen} options={{ title: '➕ Νέο Προϊόν' }} />
-          
 
           
           {/* Finance Child Screens (Using Placeholders for now) */}

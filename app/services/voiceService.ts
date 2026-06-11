@@ -1,5 +1,5 @@
 // voiceService.ts — BeeManager v4.0
-// Whisper API (OpenAI) για online transcription
+// gpt 4o mini: online API (OpenAI) για online transcription
 // executorch/offline: pending (react-native-executorch — βλ. SESSION_03.md)
 //
 // ⚠️  SECURITY: Το EXPO_PUBLIC_OPENAI_KEY είναι ορατό στο client bundle.
@@ -28,12 +28,11 @@ export type WakeWordCommand =
   | { type: 'UNKNOWN'; text: string };
 
 // ─── RECORDING OPTIONS ────────────────────────────────────────────────────────
-// Whisper API δέχεται: mp3, mp4, mpeg, mpga, m4a, wav, webm (max 25MB)
+// gpt 4o mini API δέχεται: mp3, mp4, mpeg, mpga, m4a, wav, webm (max 25MB)
 //
 // Android: HIGH_QUALITY preset → AAC/M4A — το Android MediaRecorder
 //          δεν υποστηρίζει native PCM output, οπότε custom WAV options
-//          παράγουν κατεστραμμένο αρχείο που σπάει το FFmpeg του Whisper.
-// iOS:     WAV/16kHz/mono PCM — ιδανικό για Whisper και μελλοντικό executorch.
+//          παράγουν κατεστραμμένο αρχείο που σπάει το FFmpeg του gpt 4o mini.// iOS:     WAV/16kHz/mono PCM — ιδανικό για gpt 4o mini και μελλοντικό executorch.
 
 const RECORDING_OPTIONS: Audio.RecordingOptions =
   Platform.OS === 'android'
@@ -55,7 +54,7 @@ const RECORDING_OPTIONS: Audio.RecordingOptions =
         web: {},
       };
 
-// Το MIME type που στέλνουμε στο Whisper API ανάλογα platform
+// Το MIME type που στέλνουμε στο gpt 4o mini API ανάλογα platform
 const AUDIO_MIME_TYPE = Platform.OS === 'android' ? 'audio/m4a' : 'audio/wav';
 const AUDIO_FILENAME  = Platform.OS === 'android' ? 'recording.m4a' : 'recording.wav';
 
@@ -85,7 +84,7 @@ export async function transcribeWithWhisper(audioUri: string): Promise<string> {
   const apiKey = process.env.EXPO_PUBLIC_OPENAI_KEY;
   if (!apiKey) throw new Error('EXPO_PUBLIC_OPENAI_KEY δεν έχει οριστεί.');
 
-  // Έλεγχος αρχείου πριν το στείλουμε — αποφεύγει FFmpeg decode error στο Whisper
+  // Έλεγχος αρχείου πριν το στείλουμε — αποφεύγει FFmpeg decode error στο gpt 4o mini
   const info = await FileSystem.getInfoAsync(audioUri);
   console.log('[Voice] File info before upload:', JSON.stringify(info));
   if (!info.exists) throw new Error('Το αρχείο ήχου δεν υπάρχει: ' + audioUri);
@@ -99,9 +98,9 @@ export async function transcribeWithWhisper(audioUri: string): Promise<string> {
     type: AUDIO_MIME_TYPE,
     name: AUDIO_FILENAME,
   } as unknown as Blob);
-  formData.append('model', 'whisper-1');
+  formData.append('model', 'gpt-4o-mini-transcribe');
   formData.append('language', 'el');
-  // Prompt: βοηθά το Whisper να αναγνωρίσει μελισσοκομικούς όρους
+  // Prompt: βοηθά το gpt-4o mini να αναγνωρίσει μελισσοκομικούς όρους
   formData.append(
     'prompt',
     'βαρρόα, αρρενοτόκο, ασκοσφαίρωση, νοζεμίαση, βασιλοτροφία, παραφυάδα, γονοφωλιά',
@@ -115,7 +114,7 @@ export async function transcribeWithWhisper(audioUri: string): Promise<string> {
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Whisper API error ${response.status}: ${err}`);
+    throw new Error(`Transcription API error ${response.status}: ${err}`);
   }
 
   const data = await response.json();

@@ -1,10 +1,8 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { AuthProvider, useAuth } from './app/contexts/AuthContext';
-import { initExecutorch } from 'react-native-executorch';
-import { ExpoResourceFetcher } from 'react-native-executorch-expo-resource-fetcher';
 import AddExpenseScreen from './app/screens/finance/AddExpenseScreen';
 import AddAssetScreen from './app/screens/finance/AddAssetScreen';
 
@@ -16,7 +14,6 @@ import HivesScreen from './app/screens/HivesScreen';
 import QueenScreen from './app/screens/QueenScreen';
 import ApiariesScreen from './app/screens/ApiariesScreen'; // Διορθωμένο Path
 import InspectionScreen from './app/screens/InspectionScreen';
-import ListeningScreen from './app/screens/ListeningScreen';
 
 // Finance Screens
 import FinanceScreen from './app/screens/finance/FinanceScreen';
@@ -33,7 +30,6 @@ export type RootStackParamList = {
   Queen: undefined;
   Apiaries: undefined;
   Inspection: { hive_id: string; hive_name: string; mode: 'guided' | 'free' };
-  Listening: { apiary_id?: string; apiary_name?: string };
   Finance: undefined;
   CreateProduct: undefined;
   AddExpense: { year: number };
@@ -56,10 +52,8 @@ const PlaceholderScreen = ({ route }: any) => (
 function AppNavigator() {
   const { user, loading } = useAuth();
 
-  useEffect(() => {
-    initExecutorch({ resourceFetcher: ExpoResourceFetcher });
-  }, []);
-
+  
+ 
   if (loading) return <View style={{ flex: 1, backgroundColor: '#0E1320' }} />;
 
   return (
@@ -90,7 +84,6 @@ function AppNavigator() {
 <Stack.Screen name="AddSale" component={AddSaleScreen} options={{ headerShown: false }} />
 
           <Stack.Screen name="Inspection" component={InspectionScreen} options={{ title: '🔍 Επιθεώρηση' }} />
-          <Stack.Screen name="Listening" component={ListeningScreen} options={{ headerShown: false }} />
         </>
       )}
     </Stack.Navigator>

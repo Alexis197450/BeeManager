@@ -12,7 +12,11 @@ export default function HomeScreen({ navigation }: any) {
 
       <View style={styles.menuContainer}>
 
-        
+        <TouchableOpacity style={[styles.menuButton, styles.menuButtonPrimary]}
+          onPress={() => navigation.navigate('Inspection', {})}>
+          <Text style={styles.menuIcon}>🎙️</Text>
+          <Text style={[styles.menuText, { color: '#fff' }]}>Επιθεώρηση & Τρύγος</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={styles.menuButton}
           onPress={() => navigation.navigate('Hives')}>

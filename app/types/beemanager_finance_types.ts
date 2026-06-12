@@ -11,11 +11,8 @@ export type UnitType = 'kg' | 'liters' | 'ml' | 'pieces' | 'gr';
 
 // ✅ NEW: Κατηγορίες προϊόντων μελισσοκομίας
 export type ProductCategory = 
-  | 'honey' 
-  | 'propolis' 
-  | 'pollen' 
-  | 'royal_jelly' 
-  | 'wax' 
+  | 'honey' | 'propolis' | 'pollen' | 'royal_jelly' | 'wax' 
+  | 'breeding'   // ✅ νέο
   | 'other';
 
 // ✅ NEW: Metadata για κάθε κατηγορία (auto unit selection)
@@ -29,11 +26,12 @@ export const CATEGORY_INFO: Record<ProductCategory, {
   pollen:      { label: 'Γύρη',             emoji: '🌼', defaultUnit: 'gr' },
   royal_jelly: { label: 'Βασιλικός Πολτός', emoji: '👑', defaultUnit: 'gr' },
   wax:         { label: 'Κερί',             emoji: '🕯️', defaultUnit: 'kg' },
+  breeding:    { label: 'Βασιλοτροφία',     emoji: '👑', defaultUnit: 'pieces' },
   other:       { label: 'Άλλο',             emoji: '📦', defaultUnit: 'kg' },
 };
 
 export const CATEGORY_LIST: ProductCategory[] = [
-  'honey', 'propolis', 'pollen', 'royal_jelly', 'wax', 'other',
+  'honey', 'propolis', 'pollen', 'royal_jelly','breeding', 'wax', 'other',
 ];
 
 export interface Product {

@@ -51,13 +51,19 @@ interface SaleRecord {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CATEGORIES = ['Μέλι', 'Πρόπολη', 'Γύρη', 'Βασιλικός Πολτός', 'Κερί', 'Άλλο'];
+const CATEGORIES = [
+  'Μέλι', 'Πρόπολη', 'Γύρη', 'Βασιλικός Πολτός', 'Κερί',
+  'Βασιλικά Κελιά', 'Βασίλισσες', 'Παραφυάδες', 'Άλλο',
+];
 
 const CATEGORY_EMOJI: Record<string, string> = {
   'Μέλι': '🍯',
   'Πρόπολη': '🟫',
   'Γύρη': '🌼',
   'Βασιλικός Πολτός': '👑',
+  'Βασιλικά Κελιά': '🔬',
+  'Βασίλισσες':     '👑',
+  'Παραφυάδες':     '🐝',
   'Κερί': '🕯️',
   'Άλλο': '📦',
 };
@@ -112,9 +118,22 @@ export default function AddSaleScreen({ navigation, route }: any) {
   const price = parseFloat(unitPrice) || 0;
   const total = qty * price;
 
+  const CATEGORY_MAP: Record<string, string> = {
+  'Μέλι': 'honey', 'Πρόπολη': 'propolis', 'Γύρη': 'pollen',
+  'Βασιλικός Πολτός': 'royal_jelly', 'Κερί': 'wax',
+  'Βασιλικά Κελιά': 'breeding', 'Βασίλισσες': 'breeding',
+  'Παραφυάδες': 'breeding', 'Άλλο': 'other',
+}; 
   const filteredProducts = selectedCategory
-    ? products.filter(p => p.category === selectedCategory)
-    : [];
+  ? products.filter(p => {
+      const dbCat = CATEGORY_MAP[selectedCategory] ?? selectedCategory;
+      const breedingNames = ['Βασιλικά Κελιά', 'Βασίλισσες', 'Παραφυάδες'];
+      if (breedingNames.includes(selectedCategory)) {
+        return p.category === 'breeding' && p.name === selectedCategory;
+      }
+      return p.category === dbCat;
+    })
+  : [];
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
   const fetchProducts = useCallback(async () => {

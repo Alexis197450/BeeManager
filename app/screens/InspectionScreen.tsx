@@ -324,21 +324,21 @@ export default function InspectionScreen({ route, navigation }: any) {
         }
         if (pauseReq) { await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.'); harvestPausedLoop(apiKey); return; }
         if (frames !== null) {
-          setVoiceState('processing');
-          try {
-            await createHarvest({ hive_id: hive.id, date: new Date().toISOString(), frames_harvested: frames });
-            await updateHive(hive.id, { last_harvest_date: new Date().toISOString(), last_harvest_frames: frames });
-            harvestSavedCount.current += 1;
-            setSavedCount(harvestSavedCount.current);
-            setSavedHives(sh => [...sh, { hiveName: hive.name, savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }), frames }]);
-            await speakHarvest(`Κυψέλη ${hiveNum}, ${frames} πλαίσια, αποθηκεύτηκε.`);
-          } catch (e: any) { setSessionError(`Σφάλμα: ${e.message}`); await speakHarvest('Σφάλμα αποθήκευσης.'); }
-        } else {
-          await speakHarvest('Τα πλαίσια δεν αποθηκεύτηκαν.');
-        }
-        await speakHarvest('Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
-        harvestPausedLoop(apiKey);
-        return;
+  setVoiceState('processing');
+  try {
+    await createHarvest({ hive_id: hive.id, date: new Date().toISOString(), frames_harvested: frames });
+    await updateHive(hive.id, { last_harvest_date: new Date().toISOString(), last_harvest_frames: frames });
+    harvestSavedCount.current += 1;
+    setSavedCount(harvestSavedCount.current);
+    setSavedHives(sh => [...sh, { hiveName: hive.name, savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }), frames }]);
+    await speakHarvest(`Κυψέλη ${hiveNum}, ${frames} πλαίσια, αποθηκεύτηκε.`);
+  } catch (e: any) { setSessionError(`Σφάλμα: ${e.message}`); await speakHarvest('Σφάλμα αποθήκευσης.'); }
+  await speakHarvest('Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
+} else {
+  await speakHarvest('Κυψέλη δεν καταγράφηκε. Αδράνεια. Πείτε έτοιμος για να ξαναπροσπαθήσετε.');
+}
+harvestPausedLoop(apiKey);
+return;
       }
     }
   };

@@ -455,35 +455,53 @@ export default function InspectionScreen({ route, navigation }: any) {
       }, 1000);
     },
     saveInspection: async (result: GuidedInspectionResult) => {
+  const now = new Date().toISOString();
+
+  // 1. Αποθήκευση επιθεώρησης στο ιστορικό
+  await createInspection({
+    hive_id: result.hive_id, date: now, mode: 'guided',
+    population_frames: result.population_frames ?? null, population_strength: null,
+    temperament: result.temperament as any ?? null,
+    has_swarmed: result.has_swarmed ?? false,
+    queen_present: result.queen_present ?? null,
+    queen_status: result.queen_status as any ?? null, queen_laying: null,
+    queen_cells: result.queen_cells ?? null,
+    brood_frames: result.brood_frames ?? null, brood_condition: null, brood_type: null,
+    honey_frames: result.honey_frames ?? null, pollen_frames: null,
+    feeding_type: (result.feeding_type as any) ?? 'καμία', feeding_amount: null,
+    varroa_level: null, varroa_measurement: null, diseases: null,
+    treatment_type: null, treatment_dose: null, equipment_status: null,
+    equipment_notes: null, management_actions: null,
+    next_visit: null, next_visit_reason: null,
+    urgent: result.urgent ?? false, notes: result.notes ?? null,
+    audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
+  });
+
+  // 2. Ενημέρωση τρέχουσας εικόνας κυψέλης
+  await updateHive(result.hive_id, {
+    status: result.is_dead ? 'dead' : 'active',
+    last_inspection_date: now,
+    population_frames: result.population_frames ?? null,
+    brood_frames: result.brood_frames ?? null,
+    honey_frames: result.honey_frames ?? null,
+    queen_present: result.queen_present ?? null,
+    queen_status: result.queen_status ?? null,
+    temperament: result.temperament ?? null,
+    has_swarmed: result.has_swarmed ?? false,
+    urgent: result.urgent ?? false,
+    notes: result.notes ?? null,
+  });
+
+  // 3. Refresh λίστας αν νεκρή κυψέλη
   if (result.is_dead) {
     try {
-      await updateHive(result.hive_id, { status: 'dead' });
       const fresh = await getHives();
       setHives(fresh); hivesRef.current = fresh;
     } catch {}
   }
-      await createInspection({
-        hive_id: result.hive_id, date: new Date().toISOString(), mode: 'guided',
-        population_frames: result.population_frames ?? null, population_strength: null,
-        temperament: result.temperament as any ?? null,
-        has_swarmed: result.has_swarmed ?? false,
-        queen_present: result.queen_present ?? null,
-        queen_status: result.queen_status as any ?? null, queen_laying: null,
-        queen_cells: result.queen_cells ?? null,
-        brood_frames: result.brood_frames ?? null, brood_condition: null, brood_type: null,
-        honey_frames: result.honey_frames ?? null, pollen_frames: null,
-        feeding_type: (result.feeding_type as any) ?? 'καμία', feeding_amount: null,
-        varroa_level: null, varroa_measurement: null, diseases: null,
-        treatment_type: null, treatment_dose: null, equipment_status: null,
-        equipment_notes: null, management_actions: null,
-        next_visit: null, next_visit_reason: null,
-        urgent: result.urgent ?? false, notes: result.notes ?? null,
-        audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
-      });
-    },
-    getHiveByNumber,
-  };
-
+},
+getHiveByNumber,
+};
   const startVoiceSession = async () => {
     setEntryMode('voice');
     setSavedHives([]); setSavedCount(0);

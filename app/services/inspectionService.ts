@@ -74,7 +74,21 @@ export async function createHive(input: {
 
 export async function updateHive(
   id: string,
-  input: Partial<{ name: string; location: string; type: string; status: string }>
+  input: Partial<{
+    name: string; location: string; type: string; status: string;
+    last_inspection_date: string;
+    population_frames: number | null;
+    brood_frames: number | null;
+    honey_frames: number | null;
+    queen_present: boolean | null;
+    queen_status: string | null;
+    temperament: string | null;
+    has_swarmed: boolean;
+    urgent: boolean;
+    notes: string | null;
+    last_harvest_date: string;
+    last_harvest_frames: number | null;
+  }>
 ): Promise<void> {
   const { error } = await supabase.from('hives').update(input).eq('id', id);
   if (error) throw error;

@@ -1,5 +1,4 @@
-// app/screens/InspectionScreen.tsx — v5.0
-// Άμεση έναρξη → αδράνεια μετά από κάθε κυψέλη → "έτοιμος" για επόμενη
+// app/screens/InspectionScreen.tsx — v5.3
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
@@ -8,7 +7,7 @@ import {
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import * as FileSystem from 'expo-file-system';
-import { createInspection, createHive, getHives, getInspectionsByHive, updateHive } from '../services/inspectionService';
+import { createInspection, getHives, getInspectionsByHive, updateHive } from '../services/inspectionService';
 import { createHarvest } from '../services/harvestService';
 import {
   BROOD_CONDITION_OPTIONS, DISEASES_OPTIONS, EQUIPMENT_STATUS_OPTIONS,
@@ -26,9 +25,7 @@ const C = {
   text: '#111827', textSub: '#6B7280', textLight: '#9CA3AF',
   red: '#DC2626', redLight: '#FEE2E2',
   blue: '#2563EB', blueLight: '#DBEAFE',
-  record: '#EF4444',
-  green: '#16A34A',
-  honey: '#D97706',
+  record: '#EF4444', green: '#16A34A', honey: '#D97706',
   dark: '#1E293B', darker: '#0F172A',
 };
 
@@ -109,7 +106,7 @@ function Tog({ val, set, on = 'Ναι', off = 'Όχι' }: {
   );
 }
 
-type EntryMode = 'select' | 'voice' | 'harvest' | 'manual';
+type EntryMode = 'select' | 'voice' | 'harvest' | 'manual' | 'preview';
 interface SavedHiveEntry { hiveName: string; savedAt: string; dead?: boolean; frames?: number; }
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
@@ -120,6 +117,7 @@ const RECORDING_OPTIONS: Audio.RecordingOptions = {
 
 const STT_MODEL = 'gpt-4o-mini-transcribe';
 const HARVEST_PROMPT = 'Ελληνικά: έτοιμος, στοπ, μηδέν, ένα, δύο, τρία, τέσσερα, πέντε, έξι, επτά, οκτώ, εννέα, δέκα, οριστικό τέλος, κυψέλη, πλαίσια';
+const BEEP_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg';
 
 async function speakHarvest(text: string): Promise<void> {
   try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false, staysActiveInBackground: false }); } catch {}
@@ -132,33 +130,17 @@ async function speakHarvest(text: string): Promise<void> {
   await new Promise<void>(r => setTimeout(r, 150));
 }
 
-async function recordHarvest(apiKey: string, durationMs: number, minBytes = 1000): Promise<string> {
-  // 1. BEEP ΠΡΩΤΑ — πριν δημιουργηθεί καν το Recording object
+async function recordHarvest(apiKey: string, durationMs: number): Promise<string> {
+  // BEEP ΠΡΩΤΑ
   try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false, playsInSilentModeIOS: true,
-      shouldDuckAndroid: true, playThroughEarpieceAndroid: false,
-      staysActiveInBackground: false,
-    });
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg' },
-      { shouldPlay: true, volume: 1.0 }
-    );
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false, staysActiveInBackground: false });
+    const { sound } = await Audio.Sound.createAsync({ uri: BEEP_URL }, { shouldPlay: true, volume: 1.0 });
     await new Promise(r => setTimeout(r, 400));
     await sound.unloadAsync();
   } catch {}
-
-  // 2. Audio mode σε recording
-  try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true, playsInSilentModeIOS: true,
-      shouldDuckAndroid: true, playThroughEarpieceAndroid: false,
-      staysActiveInBackground: false,
-    });
-  } catch {}
+  try { await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false, staysActiveInBackground: false }); } catch {}
   await new Promise(r => setTimeout(r, 200));
 
-  // 3. Ηχογράφηση — καθαρή, χωρίς καμία παρέμβαση
   let uri: string | null = null;
   try {
     const rec = new Audio.Recording();
@@ -167,15 +149,9 @@ async function recordHarvest(apiKey: string, durationMs: number, minBytes = 1000
     await new Promise<void>(r => setTimeout(r, durationMs));
     await rec.stopAndUnloadAsync();
     uri = rec.getURI() ?? null;
-    
-    
-  } catch (e: any) {
-    Alert.alert('CATCH ERROR', e?.message ?? 'άγνωστο σφάλμα');
-    return '';
-  }
+  } catch { return ''; }
   if (!uri) return '';
   try {
-    
     const fd = new FormData();
     fd.append('file', { uri, type: 'audio/mp4', name: 'rec.m4a' } as any);
     fd.append('model', STT_MODEL);
@@ -205,6 +181,7 @@ export default function InspectionScreen({ route, navigation }: any) {
   const [savedHives,      setSavedHives]      = useState<SavedHiveEntry[]>([]);
   const [sessionError,    setSessionError]    = useState('');
   const [savedCount,      setSavedCount]      = useState(0);
+  const [previewResult,   setPreviewResult]   = useState<GuidedInspectionResult | null>(null);
 
   const harvestStop = useRef(false);
   const harvestSavedCount = useRef(0);
@@ -270,97 +247,70 @@ export default function InspectionScreen({ route, navigation }: any) {
   }, []);
 
   const getHiveByNumber = useCallback((num: number | string) => {
-  const numStr = String(num).trim();
-  const h = hivesRef.current.find(hv => {
-    const name = hv.name.trim();
-    if (name === numStr) return true;          // ακριβές ταίριασμα
-    const m = name.match(/\d+/);               // ο αριθμός μέσα στο όνομα
-    return m ? m[0] === numStr : false;        // "Κυψέλη 12" ≠ "2"
-  });
-  return h ? { id: h.id, name: h.name } : null;
-}, []);
+    const numStr = String(num).trim();
+    const h = hivesRef.current.find(hv => {
+      const name = hv.name.trim();
+      if (name === numStr) return true;
+      const m = name.match(/\d+/);
+      return m ? m[0] === numStr : false;
+    });
+    return h ? { id: h.id, name: h.name } : null;
+  }, []);
 
   const togDis = (d: string) =>
     setDis(p => p.includes(d) ? p.filter((x: string) => x !== d) : [...p, d]);
 
-  // ═══ HARVEST v5 — άμεση έναρξη, αδράνεια μετά από κάθε κυψέλη ═══
+  // ═══ HARVEST ═══════════════════════════════════════════════
   const startHarvestSession = async () => {
     const apiKey = process.env.EXPO_PUBLIC_OPENAI_KEY ?? '';
     if (!apiKey) { Alert.alert('Σφάλμα', 'EXPO_PUBLIC_OPENAI_KEY λείπει'); return; }
-
     const { status } = await Audio.requestPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Σφάλμα', 'Δεν δόθηκε άδεια μικροφώνου'); return; }
-
     setEntryMode('harvest');
     setSavedHives([]); setSavedCount(0);
     setCurrentHiveName(''); setSessionError('');
     setCurrentQuestion(''); setLastAnswer('');
     harvestStop.current = false;
     harvestSavedCount.current = 0;
-
     await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false, staysActiveInBackground: false });
-    // Άμεση έναρξη — κατευθείαν ζητάει κυψέλη
     harvestActiveLoop(apiKey, true);
   };
 
-  // Αδράνεια — ακούει μόνο "έτοιμος" / "οριστικό τέλος"
   const harvestPausedLoop = async (apiKey: string) => {
     setVoiceState('paused');
     setCurrentHiveName('');
     setCurrentQuestion('Σε αδράνεια — πείτε "έτοιμος"');
     while (!harvestStop.current) {
-      const text = await recordHarvest(apiKey, 2500, 800);
+      const text = await recordHarvest(apiKey, 2500);
       if (!text) continue;
-
       if (isFinalEnd(text)) { await finishHarvest(); return; }
-
-      if (isWakeWord(text)) {
-        setLastAnswer(text);
-        harvestActiveLoop(apiKey, true);
-        return;
-      }
+      if (isWakeWord(text)) { setLastAnswer(text); harvestActiveLoop(apiKey, true); return; }
     }
   };
 
-  // Ενεργό — ζητάει αριθμό κυψέλης
   const harvestActiveLoop = async (apiKey: string, announce: boolean) => {
     setVoiceState('waiting_hive');
     setCurrentQuestion('Πείτε αριθμό κυψέλης');
     if (announce) await speakHarvest('Πείτε αριθμό κυψέλης.');
-
     let emptyCount = 0;
     while (!harvestStop.current) {
       const text = await recordHarvest(apiKey, 3500);
       if (!text) {
         emptyCount++;
-        if (emptyCount >= 3) {
-          await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-          harvestPausedLoop(apiKey);
-          return;
-        }
+        if (emptyCount >= 3) { await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.'); harvestPausedLoop(apiKey); return; }
         continue;
       }
       emptyCount = 0;
-
-      if (isStopWord(text)) {
-        await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-        harvestPausedLoop(apiKey);
-        return;
-      }
-
+      if (isStopWord(text)) { await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.'); harvestPausedLoop(apiKey); return; }
       if (isFinalEnd(text)) { await finishHarvest(); return; }
-
       const hiveNum = parseNum(text);
       if (hiveNum !== null && hiveNum > 0) {
         const hive = getHiveByNumber(hiveNum);
         if (!hive) { await speakHarvest(`Δεν βρήκα κυψέλη ${hiveNum}. Ξαναπείτε.`); continue; }
-
         setCurrentHiveName(hive.name);
         setVoiceState('recording');
         setCurrentQuestion(`Κυψέλη ${hiveNum} — Πόσα πλαίσια;`);
         await speakHarvest(`Κυψέλη ${hiveNum}. Πόσα πλαίσια;`);
-
-        // 3 προσπάθειες με "Επανέλαβε δεν κατάλαβα"
         let frames: number | null = null;
         let pauseReq = false;
         for (let attempt = 1; attempt <= 3 && frames === null && !harvestStop.current; attempt++) {
@@ -370,38 +320,22 @@ export default function InspectionScreen({ route, navigation }: any) {
             setLastAnswer(ans);
             frames = parseNum(ans);
           }
-          if (frames === null && !pauseReq && attempt < 3) {
-            await speakHarvest('Επανέλαβε, δεν κατάλαβα.');
-          }
+          if (frames === null && !pauseReq && attempt < 3) await speakHarvest('Επανέλαβε, δεν κατάλαβα.');
         }
-
-        if (pauseReq) {
-          await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-          harvestPausedLoop(apiKey);
-          return;
-        }
-
+        if (pauseReq) { await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.'); harvestPausedLoop(apiKey); return; }
         if (frames !== null) {
           setVoiceState('processing');
           try {
             await createHarvest({ hive_id: hive.id, date: new Date().toISOString(), frames_harvested: frames });
+            await updateHive(hive.id, { last_harvest_date: new Date().toISOString(), last_harvest_frames: frames });
             harvestSavedCount.current += 1;
             setSavedCount(harvestSavedCount.current);
-            setSavedHives(sh => [...sh, {
-              hiveName: hive.name,
-              savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }),
-              frames,
-            }]);
+            setSavedHives(sh => [...sh, { hiveName: hive.name, savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }), frames }]);
             await speakHarvest(`Κυψέλη ${hiveNum}, ${frames} πλαίσια, αποθηκεύτηκε.`);
-          } catch (e: any) {
-            setSessionError(`Σφάλμα: ${e.message}`);
-            await speakHarvest('Σφάλμα αποθήκευσης.');
-          }
+          } catch (e: any) { setSessionError(`Σφάλμα: ${e.message}`); await speakHarvest('Σφάλμα αποθήκευσης.'); }
         } else {
           await speakHarvest('Τα πλαίσια δεν αποθηκεύτηκαν.');
         }
-
-        // Μετά από κάθε κυψέλη → αδράνεια
         await speakHarvest('Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
         harvestPausedLoop(apiKey);
         return;
@@ -413,32 +347,17 @@ export default function InspectionScreen({ route, navigation }: any) {
     await speakHarvest(`Τρύγος ολοκληρώθηκε. ${harvestSavedCount.current} κυψέλες.`);
     setVoiceState('finished');
     setTimeout(() => {
-      Alert.alert('✅ Τρύγος Ολοκληρώθηκε!',
-        `${harvestSavedCount.current} κυψέλες καταγράφηκαν.`,
+      Alert.alert('✅ Τρύγος Ολοκληρώθηκε!', `${harvestSavedCount.current} κυψέλες καταγράφηκαν.`,
         [{ text: 'Πίσω', onPress: () => navigation.goBack() }]);
     }, 1000);
   };
 
-  // ═══ INSPECTION SESSION ══════════════════════════════════
+  // ═══ INSPECTION SESSION ═════════════════════════════════════
   const guidedCallbacks: GuidedSessionCallbacks = {
     onQuestion:    (q) => setCurrentQuestion(q),
     onAnswer:      (a) => setLastAnswer(a),
     onListening:   () => {},
     onHiveStart:   (name) => { setCurrentHiveName(name); setCurrentQuestion(''); setLastAnswer(''); },
-    onHiveSaved:   (name, count) => {
-      setSavedCount(count);
-      setSavedHives(prev => [...prev, {
-        hiveName: name,
-        savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }),
-      }]);
-    },
-    onHiveDead: (name) => {
-      setSavedHives(prev => [...prev, {
-        hiveName: name,
-        savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }),
-        dead: true,
-      }]);
-    },
     onError:       (msg) => setSessionError(msg),
     onStateChange: (state) => {
       setVoiceState(state);
@@ -454,54 +373,27 @@ export default function InspectionScreen({ route, navigation }: any) {
         );
       }, 1000);
     },
-    saveInspection: async (result: GuidedInspectionResult) => {
-  const now = new Date().toISOString();
+    onInspectionComplete: (result: GuidedInspectionResult) => {
+      guidedVoiceSession.reset();
+      setPreviewResult(result);
+      setPf(result.population_frames ?? 0);
+      setBf(result.brood_frames ?? 0);
+      setHf(result.honey_frames ?? 0);
+      setQp(result.queen_present ?? null);
+      setQs(result.queen_status ?? null);
+      setQc(result.queen_cells ?? 0);
+      setTp(result.temperament as any ?? null);
+      setSw(result.has_swarmed ?? false);
+      setFt(result.feeding_type as any ?? 'καμία');
+      setUrg(result.urgent ?? false);
+      setNotes(result.notes ?? '');
+      setSelectedHiveId(result.hive_id);
+      setSelectedHiveName(result.hive_name);
+      setEntryMode('preview');
+    },
+    getHiveByNumber,
+  };
 
-  // 1. Αποθήκευση επιθεώρησης στο ιστορικό
-  await createInspection({
-    hive_id: result.hive_id, date: now, mode: 'guided',
-    population_frames: result.population_frames ?? null, population_strength: null,
-    temperament: result.temperament as any ?? null,
-    has_swarmed: result.has_swarmed ?? false,
-    queen_present: result.queen_present ?? null,
-    queen_status: result.queen_status as any ?? null, queen_laying: null,
-    queen_cells: result.queen_cells ?? null,
-    brood_frames: result.brood_frames ?? null, brood_condition: null, brood_type: null,
-    honey_frames: result.honey_frames ?? null, pollen_frames: null,
-    feeding_type: (result.feeding_type as any) ?? 'καμία', feeding_amount: null,
-    varroa_level: null, varroa_measurement: null, diseases: null,
-    treatment_type: null, treatment_dose: null, equipment_status: null,
-    equipment_notes: null, management_actions: null,
-    next_visit: null, next_visit_reason: null,
-    urgent: result.urgent ?? false, notes: result.notes ?? null,
-    audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
-  });
-
-  // 2. Ενημέρωση τρέχουσας εικόνας κυψέλης
-  await updateHive(result.hive_id, {
-    status: result.is_dead ? 'dead' : 'active',
-    last_inspection_date: now,
-    population_frames: result.population_frames ?? null,
-    brood_frames: result.brood_frames ?? null,
-    honey_frames: result.honey_frames ?? null,
-    queen_present: result.queen_present ?? null,
-    queen_status: result.queen_status ?? null,
-    temperament: result.temperament ?? null,
-    has_swarmed: result.has_swarmed ?? false,
-    urgent: result.urgent ?? false,
-    notes: result.notes ?? null,
-  });
-
-  // 3. Refresh λίστας αν νεκρή κυψέλη
-  if (result.is_dead) {
-    try {
-      const fresh = await getHives();
-      setHives(fresh); hivesRef.current = fresh;
-    } catch {}
-  }
-},
-getHiveByNumber,
-};
   const startVoiceSession = async () => {
     setEntryMode('voice');
     setSavedHives([]); setSavedCount(0);
@@ -511,9 +403,97 @@ getHiveByNumber,
     await guidedVoiceSession.start(guidedCallbacks);
   };
 
+  const savePreviewInspection = async () => {
+    if (!selectedHiveId) { Alert.alert('Προσοχή', 'Δεν βρέθηκε κυψέλη.'); return; }
+    setSaving(true);
+    const now = new Date().toISOString();
+    try {
+      await createInspection({
+        hive_id: selectedHiveId, date: now, mode: 'guided',
+        population_frames: pf || null, population_strength: ps as any,
+        temperament: tp as any, has_swarmed: sw, queen_present: qp,
+        queen_status: qs as any, queen_laying: ql as any, queen_cells: qc || null,
+        brood_frames: bf || null, brood_condition: bc as any, brood_type: bt as any,
+        honey_frames: hf || null, pollen_frames: plf || null,
+        feeding_type: ft as any, feeding_amount: ft !== 'καμία' ? fa : null,
+        varroa_level: vl as any, varroa_measurement: vm ? parseFloat(vm) : null,
+        diseases: dis.length ? dis.join(', ') : null,
+        treatment_type: tt || null, treatment_dose: td ? parseFloat(td) : null,
+        equipment_status: es as any, equipment_notes: en || null,
+        management_actions: ma || null, next_visit: nv || null,
+        next_visit_reason: nvr || null, urgent: urg, notes: notes || null,
+        audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
+      });
+      await updateHive(selectedHiveId, {
+        status: previewResult?.is_dead ? 'dead' : 'active',
+        last_inspection_date: now,
+        population_frames: pf || null,
+        brood_frames: bf || null,
+        honey_frames: hf || null,
+        queen_present: qp ?? null,
+        queen_status: qs ?? null,
+        temperament: tp ?? null,
+        has_swarmed: sw,
+        urgent: urg,
+        notes: notes || null,
+      });
+      if (previewResult?.is_dead) {
+        try { const fresh = await getHives(); setHives(fresh); hivesRef.current = fresh; } catch {}
+      }
+      Alert.alert('✅ Αποθηκεύτηκε!',
+        `Επιθεώρηση κυψέλης "${selectedHiveName}" καταχωρήθηκε.`,
+        [{ text: 'Πίσω', onPress: () => navigation.goBack() }]);
+    } catch (e: any) {
+      Alert.alert('Σφάλμα', e.message ?? 'Αποτυχία αποθήκευσης');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveManualInspection = async () => {
+    if (!selectedHiveId) { Alert.alert('Προσοχή', 'Επίλεξε κυψέλη.'); return; }
+    setSaving(true);
+    const now = new Date(date).toISOString();
+    try {
+      await createInspection({
+        hive_id: selectedHiveId, date: now, mode,
+        population_frames: pf || null, population_strength: ps as any,
+        temperament: tp as any, has_swarmed: sw, queen_present: qp,
+        queen_status: qs as any, queen_laying: ql as any, queen_cells: qc || null,
+        brood_frames: bf || null, brood_condition: bc as any, brood_type: bt as any,
+        honey_frames: hf || null, pollen_frames: plf || null,
+        feeding_type: ft as any, feeding_amount: ft !== 'καμία' ? fa : null,
+        varroa_level: vl as any, varroa_measurement: vm ? parseFloat(vm) : null,
+        diseases: dis.length ? dis.join(', ') : null,
+        treatment_type: tt || null, treatment_dose: td ? parseFloat(td) : null,
+        equipment_status: es as any, equipment_notes: en || null,
+        management_actions: ma || null, next_visit: nv || null,
+        next_visit_reason: nvr || null, urgent: urg, notes: notes || null,
+        audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
+      });
+      await updateHive(selectedHiveId, {
+        last_inspection_date: now,
+        population_frames: pf || null,
+        brood_frames: bf || null,
+        honey_frames: hf || null,
+        queen_present: qp ?? null,
+        queen_status: qs ?? null,
+        temperament: tp ?? null,
+        has_swarmed: sw,
+        urgent: urg,
+        notes: notes || null,
+      });
+      Alert.alert('✅ Αποθηκεύτηκε!', `Επιθεώρηση "${selectedHiveName}" καταχωρήθηκε.`,
+        [{ text: 'Πίσω', onPress: () => navigation.goBack() }]);
+    } catch (e: any) {
+      Alert.alert('Σφάλμα', e.message ?? 'Αποτυχία αποθήκευσης');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleForceStop = () => {
-    Alert.alert('Διακοπή',
-      'Θέλεις να τερματίσεις; Οι αποθηκευμένες κυψέλες δεν θα χαθούν.',
+    Alert.alert('Διακοπή', 'Θέλεις να τερματίσεις;',
       [
         { text: 'Άκυρο', style: 'cancel' },
         { text: 'Διακοπή', style: 'destructive', onPress: () => {
@@ -526,12 +506,12 @@ getHiveByNumber,
   };
 
   const stateLabel: Record<string, { icon: string; label: string; color: string }> = {
-    idle:         { icon: '💤', label: 'Έτοιμο',                       color: C.dark },
-    paused:       { icon: '⏸️', label: 'Αδράνεια — πείτε "έτοιμος"',   color: '#334155' },
-    waiting_hive: { icon: '🎙️', label: 'Ακούω...',                     color: '#1E3A5F' },
-    recording:    { icon: '🔴', label: 'Καταγραφή',                    color: '#7F1D1D' },
-    processing:   { icon: '⚙️', label: 'Αποθήκευση...',                color: '#1E293B' },
-    finished:     { icon: '✅', label: 'Ολοκληρώθηκε',                  color: '#14532D' },
+    idle:         { icon: '💤', label: 'Έτοιμο',                      color: C.dark },
+    paused:       { icon: '⏸️', label: 'Αδράνεια — πείτε "έτοιμος"',  color: '#334155' },
+    waiting_hive: { icon: '🎙️', label: 'Ακούω...',                    color: '#1E3A5F' },
+    recording:    { icon: '🔴', label: 'Καταγραφή',                   color: '#7F1D1D' },
+    processing:   { icon: '⚙️', label: 'Επεξεργασία...',              color: '#1E293B' },
+    finished:     { icon: '✅', label: 'Ολοκληρώθηκε',                 color: '#14532D' },
   };
   const cfg = stateLabel[voiceState] ?? stateLabel.idle;
 
@@ -541,34 +521,30 @@ getHiveByNumber,
       <ScrollView style={s.selectContainer} contentContainerStyle={{ paddingBottom: 40 }}>
         <Text style={s.selectTitle}>🐝 Νέα Καταχώρηση</Text>
         <Text style={s.selectSub}>Επίλεξε τρόπο</Text>
-
         <TouchableOpacity style={s.selectBtnVoice} onPress={startVoiceSession} activeOpacity={0.85}>
           <Text style={s.selectBtnIcon}>🎙️</Text>
           <Text style={s.selectBtnTitle}>Φωνητική Επιθεώρηση</Text>
           <Text style={s.selectBtnSub}>Ξεκινάει αμέσως — "στοπ" για παύση</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={s.selectBtnHarvest} onPress={startHarvestSession} activeOpacity={0.85}>
           <Text style={s.selectBtnIcon}>🍯</Text>
           <Text style={s.selectBtnTitle}>Τρύγος</Text>
           <Text style={s.selectBtnSub}>Ξεκινάει αμέσως — πλαίσια ανά κυψέλη</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={s.selectBtnManual} onPress={() => setEntryMode('manual')} activeOpacity={0.85}>
           <Text style={s.selectBtnIcon}>✍️</Text>
           <Text style={[s.selectBtnTitle, { color: C.text }]}>Χειροκίνητη Καταχώρηση</Text>
           <Text style={[s.selectBtnSub, { color: C.textSub }]}>Συμπλήρωσε τα πεδία χειρόγραφα</Text>
         </TouchableOpacity>
-
         <View style={s.cmdGuide}>
           <Text style={s.cmdTitle}>📋 Φωνητικές Εντολές</Text>
           {[
-            ['[αριθμός]',      'Επιλογή κυψέλης / πλαίσια'],
-            ['στοπ',           'Παύση — αδράνεια'],
-            ['έτοιμος',        'Συνέχεια από αδράνεια'],
-            ['ναι / όχι',      'Απαντήσεις ερωτήσεων'],
-            ['παράλειψη',      'Παράλειψη σημειώσεων'],
-            ['τέλος',          'Τέλος σημειώσεων'],
+            ['[αριθμός]', 'Επιλογή κυψέλης / πλαίσια'],
+            ['στοπ', 'Παύση — αδράνεια'],
+            ['έτοιμος', 'Συνέχεια από αδράνεια'],
+            ['ναι / όχι', 'Απαντήσεις ερωτήσεων'],
+            ['παράλειψη', 'Παράλειψη σημειώσεων'],
+            ['τέλος', 'Τέλος σημειώσεων'],
             ['οριστικό τέλος', 'Τερματισμός'],
           ].map(([cmd, desc]) => (
             <View key={cmd + desc} style={s.cmdRow}>
@@ -581,17 +557,13 @@ getHiveByNumber,
     );
   }
 
-  // ─── VOICE / HARVEST MODE ─────────────────────────────────
+  // ─── VOICE / HARVEST ──────────────────────────────────────
   if (entryMode === 'voice' || entryMode === 'harvest') {
     const isHarvest = entryMode === 'harvest';
     return (
       <View style={s.voiceContainer}>
         <View style={s.voiceHeader}>
-          <TouchableOpacity onPress={() => {
-            guidedVoiceSession.reset();
-            harvestStop.current = true;
-            setEntryMode('select');
-          }} style={s.backBtn}>
+          <TouchableOpacity onPress={() => { guidedVoiceSession.reset(); harvestStop.current = true; setEntryMode('select'); }} style={s.backBtn}>
             <Text style={s.backBtnTxt}>← Πίσω</Text>
           </TouchableOpacity>
           <Text style={[s.voiceTitle, isHarvest && { color: C.honey }]}>
@@ -619,9 +591,7 @@ getHiveByNumber,
               ? <ActivityIndicator color="#fff" size="large" style={{ marginBottom: 12 }} />
               : <Text style={s.statusIcon}>{cfg.icon}</Text>}
             <Text style={s.statusLabel}>{cfg.label}</Text>
-            {!!sessionError && (
-              <Text style={[s.statusSub, { color: '#FCA5A5', marginTop: 8 }]}>⚠️ {sessionError}</Text>
-            )}
+            {!!sessionError && <Text style={[s.statusSub, { color: '#FCA5A5', marginTop: 8 }]}>⚠️ {sessionError}</Text>}
           </View>
           {!!currentQuestion && (
             <View style={[s.qaBox, isHarvest && { borderColor: C.honey }]}>
@@ -636,8 +606,7 @@ getHiveByNumber,
                 <View key={i} style={s.savedRow}>
                   <Text style={s.savedRowIcon}>{h.dead ? '💀' : isHarvest ? '🍯' : '🐝'}</Text>
                   <Text style={[s.savedRowName, h.dead && { color: '#F87171' }]}>
-                    Κυψέλη {h.hiveName}
-                    {h.dead ? ' — ΝΕΚΡΗ' : h.frames !== undefined ? ` — ${h.frames} πλαίσια` : ''}
+                    Κυψέλη {h.hiveName}{h.dead ? ' — ΝΕΚΡΗ' : h.frames !== undefined ? ` — ${h.frames} πλαίσια` : ''}
                   </Text>
                   <Text style={s.savedRowTime}>{h.savedAt}</Text>
                 </View>
@@ -662,36 +631,74 @@ getHiveByNumber,
     );
   }
 
-  // ─── MANUAL ───────────────────────────────────────────────
-  const saveManualInspection = async () => {
-    if (!selectedHiveId) { Alert.alert('Προσοχή', 'Επίλεξε κυψέλη.'); return; }
-    setSaving(true);
-    try {
-      await createInspection({
-        hive_id: selectedHiveId, date: new Date(date).toISOString(), mode,
-        population_frames: pf || null, population_strength: ps as any,
-        temperament: tp as any, has_swarmed: sw, queen_present: qp,
-        queen_status: qs as any, queen_laying: ql as any, queen_cells: qc || null,
-        brood_frames: bf || null, brood_condition: bc as any, brood_type: bt as any,
-        honey_frames: hf || null, pollen_frames: plf || null,
-        feeding_type: ft as any, feeding_amount: ft !== 'καμία' ? fa : null,
-        varroa_level: vl as any, varroa_measurement: vm ? parseFloat(vm) : null,
-        diseases: dis.length ? dis.join(', ') : null,
-        treatment_type: tt || null, treatment_dose: td ? parseFloat(td) : null,
-        equipment_status: es as any, equipment_notes: en || null,
-        management_actions: ma || null, next_visit: nv || null,
-        next_visit_reason: nvr || null, urgent: urg, notes: notes || null,
-        audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
-      });
-      Alert.alert('✅ Αποθηκεύτηκε!', `Επιθεώρηση "${selectedHiveName}" καταχωρήθηκε.`,
-        [{ text: 'Πίσω', onPress: () => navigation.goBack() }]);
-    } catch (e: any) {
-      Alert.alert('Σφάλμα', e.message ?? 'Αποτυχία αποθήκευσης');
-    } finally {
-      setSaving(false);
-    }
-  };
+  // ─── PREVIEW (μετά από φωνητική) ──────────────────────────
+  if (entryMode === 'preview') {
+    return (
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+          <View style={{ backgroundColor: C.primary, borderRadius: 16, padding: 16, marginBottom: 16, alignItems: 'center' }}>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#fff' }}>🎙️ Έλεγχος Καταγραφής</Text>
+            <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 }}>
+              Κυψέλη {selectedHiveName} — Διόρθωσε αν χρειάζεται
+            </Text>
+          </View>
+          <View style={s.card}>
+            <SH e="👑" t="Πληθυσμός & Βασίλισσα" />
+            <Lbl text="Πλαίσια με Μέλισσες" /><Step val={pf} set={setPf} sfx="πλαίσια" />
+            <Lbl text="Ιδιοσυγκρασία" /><Chips opts={TEMPERAMENT_OPTIONS} val={tp} onSel={setTp} />
+            <Lbl text="Σμηνουργία" /><Tog val={sw} set={setSw} on="🐝 Σμηνουργήσε" off="Δεν σμηνούγησε" />
+            <Lbl text="Παρουσία Βασίλισσας" />
+            <View style={s.row}>
+              {[{ v: true, l: '✅ Ναι' }, { v: false, l: '❌ Όχι' }, { v: null, l: '❓ Αβέβαιο' }].map(o => (
+                <TouchableOpacity key={String(o.v)} style={[s.chip, qp === o.v && s.chipA]} onPress={() => setQp(o.v)} activeOpacity={0.7}>
+                  <Text style={[s.ct, qp === o.v && s.chipA]}>{o.l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {qp !== null && (
+              <>
+                <Lbl text="Κατάσταση Βασίλισσας" />
+                <Chips opts={[
+                  { value: 'Εξαιρετική', label: '⭐ Εξαιρετική' },
+                  { value: 'Μέτρια',     label: '😐 Μέτρια'     },
+                  { value: 'κακή',       label: '❌ Κακή'       },
+                  { value: 'Δεν εντοπίστηκε', label: '🔍 Δεν εντοπίστηκε' },
+                  { value: 'Σμηνουργίας', label: '🐝 Σμηνουργίας' },
+                  { value: 'Ορφανό',      label: '⚠️ Ορφανό'      },
+                ]} val={qs} onSel={setQs} />
+              </>
+            )}
+            <Lbl text="Βασιλικά Κελιά" /><Step val={qc} set={setQc} max={20} sfx="κελιά" />
+          </View>
+          <View style={s.card}>
+            <SH e="🥚" t="Γόνος & Αποθέματα" />
+            <Lbl text="Πλαίσια Γόνου" /><Step val={bf} set={setBf} sfx="πλαίσια" />
+            <Lbl text="Πλαίσια Μελιού" /><Step val={hf} set={setHf} sfx="πλαίσια" />
+            <Lbl text="Τροφοδοσία" /><Chips opts={FEEDING_TYPE_OPTIONS} val={ft} onSel={setFt} />
+          </View>
+          <View style={s.card}>
+            <SH e="📝" t="Σημειώσεις & Προτεραιότητα" />
+            <Lbl text="Προτεραιότητα" /><Tog val={urg} set={setUrg} on="⚠️ Επείγον" off="✅ Κανονικό" />
+            <Lbl text="Σημειώσεις" />
+            <TextInput style={[s.inp, s.ta]} value={notes} onChangeText={setNotes}
+              multiline numberOfLines={4} placeholder="Ελεύθερες παρατηρήσεις..."
+              placeholderTextColor={C.textLight} />
+          </View>
+          <TouchableOpacity style={[s.saveBtn, saving && { opacity: 0.6 }]}
+            onPress={savePreviewInspection} disabled={saving} activeOpacity={0.85}>
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveTxt}>💾 Αποθήκευση Επιθεώρησης</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.saveBtn, { backgroundColor: C.textSub, marginTop: 8 }]}
+            onPress={() => setEntryMode('select')} activeOpacity={0.85}>
+            <Text style={s.saveTxt}>🗑️ Απόρριψη</Text>
+          </TouchableOpacity>
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
+  // ─── MANUAL ───────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
@@ -750,10 +757,10 @@ getHiveByNumber,
             <>
               <Lbl text="Κατάσταση Βασίλισσας" />
               <Chips opts={[
-                { value: 'Εξαιρετική',         label: '⭐ Εξαιρετική'         },
-                { value: 'Μέτρια',             label: '😐 Μέτρια'             },
-                { value: 'κακή',               label: '❌ Κακή'               },
-                { value: 'Δεν εντοπίστηκε',    label: '🔍 Δεν εντοπίστηκε'   },
+                { value: 'Εξαιρετική',      label: '⭐ Εξαιρετική'      },
+                { value: 'Μέτρια',          label: '😐 Μέτρια'          },
+                { value: 'κακή',            label: '❌ Κακή'            },
+                { value: 'Δεν εντοπίστηκε', label: '🔍 Δεν εντοπίστηκε' },
                 { value: 'Σμηνουργίας',     label: '🐝 Σμηνουργίας'     },
                 { value: 'Ορφανό',          label: '⚠️ Ορφανό'          },
               ]} val={qs} onSel={setQs} />

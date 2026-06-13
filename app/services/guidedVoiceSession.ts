@@ -1,4 +1,7 @@
-// guidedVoiceSession.ts — BeeManager v5.2
+// guidedVoiceSession.ts — BeeManager v5.3
+// v5.3: saveInspection αφαιρέθηκε — αντικαταστάθηκε με onInspectionComplete
+// Τα δεδομένα πηγαίνουν πρώτα στο preview, ο χρήστης επιβεβαιώνει, μετά αποθηκεύονται
+
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import * as FileSystem from 'expo-file-system';
@@ -15,7 +18,7 @@ const GREEK_NUMBERS: Record<string, number> = {
   'οκτώ': 8, 'οκτω': 8, 'οχτώ': 8, 'οχτω': 8,
   'εννέα': 9, 'εννεα': 9, 'εννιά': 9, 'εννια': 9,
   'δέκα': 10, 'δεκα': 10,
-  'έντεκα': 11, 'εντεκα': 11,
+  'έντεκα': 11, 'εντεκa': 11,
   'δώδεκα': 12, 'δωδεκα': 12,
   'δεκατρία': 13, 'δεκατρια': 13,
   'δεκατέσσερα': 14, 'δεκατεσσερα': 14,
@@ -120,20 +123,19 @@ export interface GuidedInspectionResult {
 }
 
 export interface GuidedSessionCallbacks {
-  onQuestion:      (question: string) => void;
-  onAnswer:        (answer: string) => void;
-  onListening:     () => void;
-  onHiveStart:     (hiveName: string) => void;
-  onHiveSaved:     (hiveName: string, count: number) => void;
-  onHiveDead:      (hiveName: string) => void;
-  onError:         (msg: string) => void;
-  onFinished:      (count: number) => void;
-  onStateChange:   (state: string) => void;
-  saveInspection:  (result: GuidedInspectionResult) => Promise<void>;
-  getHiveByNumber: (num: number) => { id: string; name: string } | null;
+  onQuestion:           (question: string) => void;
+  onAnswer:             (answer: string) => void;
+  onListening:          () => void;
+  onHiveStart:          (hiveName: string) => void;
+  onError:              (msg: string) => void;
+  onFinished:           (count: number) => void;
+  onStateChange:        (state: string) => void;
+  // v5.3: αντί για saveInspection, τώρα onInspectionComplete
+  // Η οθόνη παίρνει τα δεδομένα, τα βάζει στη φόρμα preview, ο χρήστης αποθηκεύει
+  onInspectionComplete: (result: GuidedInspectionResult) => void;
+  getHiveByNumber:      (num: number) => { id: string; name: string } | null;
 }
 
-// Τύποι επιστροφής — χωριστοί για number και boolean ώστε να μην μπερδεύεται το TS
 type NumResult   = { kind: 'ok'; value: number | null } | { kind: 'paused' } | { kind: 'ended' };
 type BoolResult  = { kind: 'ok'; value: boolean | null } | { kind: 'paused' } | { kind: 'ended' };
 type AskResult   = { kind: 'ok'; text: string } | { kind: 'failed' } | { kind: 'paused' } | { kind: 'ended' };
@@ -146,7 +148,7 @@ export class GuidedVoiceSession {
   private stop     = false;
   private apiKey   = '';
   private cb: GuidedSessionCallbacks | null = null;
-  private savedCount = 0;
+  private completedCount = 0;
   private activeRecording: Audio.Recording | null = null;
   private gen = 0;
   private resumeCallback: (() => void) | null = null;
@@ -173,7 +175,6 @@ export class GuidedVoiceSession {
     } catch {}
   }
 
-  // Beep ΠΡΙΝ την ηχογράφηση — τελείως χωριστό από το Recording object
   private async beep(): Promise<void> {
     try {
       await this.setPlayback();
@@ -252,8 +253,6 @@ export class GuidedVoiceSession {
     finally { try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {} }
   }
 
-  // ── Βασικές ask functions ────────────────────────────────
-
   private async ask(g: number, question: string, durationMs = 3500): Promise<AskResult> {
     this.cb?.onQuestion(question);
     await this.speak(g, question);
@@ -270,13 +269,12 @@ export class GuidedVoiceSession {
     return { kind: 'failed' };
   }
 
-  // Ερώτηση αριθμού — επιστρέφει NumResult (χωρίς PAUSED στον τύπο του value)
   private async askNumber(g: number, question: string, fieldLabel: string): Promise<NumResult> {
     const res = await this.ask(g, question, 3500);
     if (res.kind === 'ended')  return { kind: 'ended' };
     if (res.kind === 'paused') return { kind: 'paused' };
     if (res.kind === 'failed') {
-      await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+      await this.speak(g, `${fieldLabel} δεν καταγράφηκε.`);
       return { kind: 'ok', value: null };
     }
     let n = parseNumber(res.text);
@@ -291,18 +289,17 @@ export class GuidedVoiceSession {
           n = parseNumber(t2);
         }
       }
-      if (n === null) await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+      if (n === null) await this.speak(g, `${fieldLabel} δεν καταγράφηκε.`);
     }
     return { kind: 'ok', value: n };
   }
 
-  // Ερώτηση ναι/όχι — επιστρέφει BoolResult
   private async askYesNo(g: number, question: string, fieldLabel: string): Promise<BoolResult> {
     const res = await this.ask(g, question, 3000);
     if (res.kind === 'ended')  return { kind: 'ended' };
     if (res.kind === 'paused') return { kind: 'paused' };
     if (res.kind === 'failed') {
-      await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+      await this.speak(g, `${fieldLabel} δεν καταγράφηκε.`);
       return { kind: 'ok', value: null };
     }
     if (isYes(res.text)) return { kind: 'ok', value: true };
@@ -318,21 +315,18 @@ export class GuidedVoiceSession {
         if (isNo(t2))  return { kind: 'ok', value: false };
       }
     }
-    await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+    await this.speak(g, `${fieldLabel} δεν καταγράφηκε.`);
     return { kind: 'ok', value: null };
   }
 
-  // Helper: αδράνεια + επανέναρξη όταν πει "έτοιμος"
   private async doPause(g: number, msg: string): Promise<boolean> {
     await this.speak(g, msg);
     await new Promise<void>(resolve => {
       this.resumeCallback = () => resolve();
       this.pausedLoop(g);
     });
-    return this.dead(g); // επιστρέφει true αν πρέπει να σταματήσουμε
+    return this.dead(g);
   }
-
-  // ── START ─────────────────────────────────────────────────
 
   async start(cb: GuidedSessionCallbacks): Promise<void> {
     if (this.running) return;
@@ -341,14 +335,12 @@ export class GuidedVoiceSession {
     const { status } = await Audio.requestPermissionsAsync();
     if (status !== 'granted') { cb.onError('Δεν δόθηκε άδεια μικροφώνου'); return; }
     this.running = true; this.stop = false;
-    this.apiKey = key; this.cb = cb; this.savedCount = 0;
+    this.apiKey = key; this.cb = cb; this.completedCount = 0;
     this.resumeCallback = null;
     const g = ++this.gen;
     await this.setRecording();
     this.waitForHive(g);
   }
-
-  // ── ΑΔΡΑΝΕΙΑ ─────────────────────────────────────────────
 
   private async pausedLoop(g: number): Promise<void> {
     this.cb?.onStateChange('paused');
@@ -369,8 +361,6 @@ export class GuidedVoiceSession {
       }
     }
   }
-
-  // ── ΑΝΑΜΟΝΗ ΚΥΨΕΛΗΣ ──────────────────────────────────────
 
   private async waitForHive(g: number): Promise<void> {
     this.cb?.onStateChange('waiting_hive');
@@ -405,8 +395,11 @@ export class GuidedVoiceSession {
           const outcome = await this.runInspection(g, hive.id, hive.name, num);
           if (this.dead(g)) return;
           if (outcome === 'ended') { await this.finishSession(g); return; }
+          // v5.3: μετά από κάθε κυψέλη → αδράνεια
+          // Ο χρήστης βλέπει το preview και αποθηκεύει
+          // Μετά λέει "έτοιμος" για επόμενη
           this.resumeCallback = () => this.waitForHive(g);
-          await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
+          await this.doPause(g, 'Ελέγξτε την καταγραφή. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
           return;
         } else {
           await this.speak(g, `Δεν βρήκα κυψέλη ${num}. Ξαναπείτε.`);
@@ -416,14 +409,11 @@ export class GuidedVoiceSession {
   }
 
   private async finishSession(g: number): Promise<void> {
-    await this.speak(g, `Τέλος. ${this.savedCount} κυψέλες καταγράφηκαν.`);
+    await this.speak(g, `Τέλος. ${this.completedCount} κυψέλες καταγράφηκαν.`);
     this.cb?.onStateChange('finished');
-    this.cb?.onFinished(this.savedCount);
+    this.cb?.onFinished(this.completedCount);
     this.running = false;
   }
-
-  // ── INSPECTION FLOW ───────────────────────────────────────
-  // Κάθε ερώτηση: αν PAUSED → αδράνεια → "έτοιμος" → επαναλαμβάνεται η ΙΔΙΑ ερώτηση
 
   private async runInspection(
     g: number, hiveId: string, hiveName: string, hiveNum: number,
@@ -437,20 +427,17 @@ export class GuidedVoiceSession {
       notes: null, urgent: false, is_dead: false,
     };
 
-    // Helper: επανάληψη ερώτησης αριθμού μέχρι να πάρουμε ok ή ended
     const getNum = async (question: string, label: string): Promise<{ value: number | null } | 'ended'> => {
       while (!this.dead(g)) {
         const r = await this.askNumber(g, question, label);
         if (r.kind === 'ended') return 'ended';
         if (r.kind === 'ok')    return { value: r.value };
-        // paused: αδράνεια, μετά επανάληψη
         const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
         if (stopped) return 'ended';
       }
       return 'ended';
     };
 
-    // Helper: επανάληψη ερώτησης ναι/όχι μέχρι να πάρουμε ok ή ended
     const getBool = async (question: string, label: string): Promise<{ value: boolean | null } | 'ended'> => {
       while (!this.dead(g)) {
         const r = await this.askYesNo(g, question, label);
@@ -464,41 +451,33 @@ export class GuidedVoiceSession {
 
     // ── 1. Πληθυσμός ─────────────────────────────────────────
     const pop = await getNum(`Κυψέλη ${hiveNum}. Πόσα πλαίσια πληθυσμός;`, 'Ο πληθυσμός');
-    if (pop === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (pop === 'ended') { this.sendToPreview(result); return 'ended'; }
     if (pop.value === 0) {
       result.is_dead = true; result.population_frames = 0;
       result.urgent = true; result.notes = 'Νεκρό μελίσσι';
-      this.cb?.onHiveDead(hiveName);
-      this.cb?.onStateChange('processing');
-      try {
-        await this.cb?.saveInspection(result);
-        this.savedCount++;
-        await this.speak(g, `Κυψέλη ${hiveNum} νεκρή. Καταγράφηκε.`);
-      } catch (e: any) {
-        this.cb?.onError(`Σφάλμα: ${e?.message ?? 'άγνωστο'}`);
-        await this.speak(g, 'Σφάλμα αποθήκευσης.');
-      }
+      await this.speak(g, `Κυψέλη ${hiveNum} νεκρή. Ελέγξτε την καταγραφή.`);
+      this.sendToPreview(result);
       return 'done';
     }
     result.population_frames = pop.value;
 
     // ── 2. Γόνος ─────────────────────────────────────────────
     const brood = await getNum('Πόσα πλαίσια γόνος;', 'Ο γόνος');
-    if (brood === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (brood === 'ended') { this.sendToPreview(result); return 'ended'; }
     result.brood_frames = brood.value;
 
     // ── 3. Μέλι ──────────────────────────────────────────────
     const honey = await getNum('Πόσα πλαίσια μέλι;', 'Το μέλι');
-    if (honey === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (honey === 'ended') { this.sendToPreview(result); return 'ended'; }
     result.honey_frames = honey.value;
 
     // ── 4. Βασίλισσα ─────────────────────────────────────────
     const queenPresent = await getBool('Βασίλισσα παρούσα;', 'Η βασίλισσα');
-    if (queenPresent === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (queenPresent === 'ended') { this.sendToPreview(result); return 'ended'; }
     result.queen_present = queenPresent.value;
     if (queenPresent.value === false) {
       const dayBrood = await getBool('Είδες γόνο ημέρας;', 'Ο γόνος ημέρας');
-      if (dayBrood === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+      if (dayBrood === 'ended') { this.sendToPreview(result); return 'ended'; }
       if (dayBrood.value === true)  result.queen_status = 'Δεν εντοπίστηκε';
       if (dayBrood.value === false) {
         result.queen_status = 'Ορφανό'; result.urgent = true; result.notes = 'Ορφανό μελίσσι';
@@ -507,10 +486,10 @@ export class GuidedVoiceSession {
 
     // ── 5. Βασιλικά κελιά ────────────────────────────────────
     const hasCells = await getBool('Βασιλικά κελιά;', 'Τα κελιά');
-    if (hasCells === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (hasCells === 'ended') { this.sendToPreview(result); return 'ended'; }
     if (hasCells.value === true) {
       const cells = await getNum('Πόσα;', 'Τα κελιά');
-      if (cells === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+      if (cells === 'ended') { this.sendToPreview(result); return 'ended'; }
       result.queen_cells = cells.value;
     } else {
       result.queen_cells = 0;
@@ -518,13 +497,13 @@ export class GuidedVoiceSession {
 
     // ── 6. Ιδιοσυγκρασία ─────────────────────────────────────
     const calm = await getBool('Ήρεμο μελίσσι;', 'Η ιδιοσυγκρασία');
-    if (calm === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (calm === 'ended') { this.sendToPreview(result); return 'ended'; }
     if (calm.value === true)  result.temperament = 'ήρεμο';
     if (calm.value === false) result.temperament = 'επιθετικό';
 
     // ── 7. Σμηνουργία ────────────────────────────────────────
     const swarm = await getBool('Τάση σμηνουργίας;', 'Η σμηνουργία');
-    if (swarm === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (swarm === 'ended') { this.sendToPreview(result); return 'ended'; }
     result.has_swarmed = swarm.value === true;
 
     // ── 8. Σημειώσεις ────────────────────────────────────────
@@ -558,23 +537,16 @@ export class GuidedVoiceSession {
       result.notes = (result.notes ? result.notes + '. ' : '') + notesText.trim();
     }
 
-    await this.saveResult(g, result, hiveNum, hiveName);
+    // v5.3: ΔΕΝ αποθηκεύουμε εδώ — στέλνουμε στο preview
+    await this.speak(g, `Κυψέλη ${hiveNum} καταγράφηκε. Ελέγξτε την οθόνη.`);
+    this.sendToPreview(result);
     return 'done';
   }
 
-  private async saveResult(
-    g: number, result: GuidedInspectionResult, hiveNum: number, hiveName: string,
-  ): Promise<void> {
-    this.cb?.onStateChange('processing');
-    try {
-      await this.cb?.saveInspection(result);
-      this.savedCount++;
-      this.cb?.onHiveSaved(hiveName, this.savedCount);
-      await this.speak(g, `Κυψέλη ${hiveNum} αποθηκεύτηκε.`);
-    } catch (e: any) {
-      this.cb?.onError(`Σφάλμα: ${e?.message ?? 'άγνωστο'}`);
-      await this.speak(g, 'Σφάλμα αποθήκευσης.');
-    }
+  // v5.3: στέλνει το result στην οθόνη για preview — χωρίς Supabase
+  private sendToPreview(result: GuidedInspectionResult): void {
+    this.completedCount++;
+    this.cb?.onInspectionComplete(result);
   }
 
   reset(): void {

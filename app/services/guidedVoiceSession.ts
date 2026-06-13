@@ -1,10 +1,8 @@
-// guidedVoiceSession.ts — BeeManager v5.0
-// Άμεση έναρξη → ερωτήσεις → αδράνεια μετά από κάθε κυψέλη → "έτοιμος" για επόμενη
+// guidedVoiceSession.ts — BeeManager v5.2
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import * as FileSystem from 'expo-file-system';
 
-// ─── GREEK NUMBERS ──────────────────────────────────────────────────────────
 const GREEK_NUMBERS: Record<string, number> = {
   'μηδέν': 0, 'μηδεν': 0, 'τίποτα': 0, 'τιποτα': 0, 'μηδέ': 0,
   'ένα': 1, 'ενα': 1, 'μία': 1, 'μια': 1,
@@ -38,12 +36,15 @@ export function normalizeGreek(text: string): string {
     .trim();
 }
 
+const SORTED_NUMBER_ENTRIES = Object.entries(GREEK_NUMBERS)
+  .sort((a, b) => b[0].length - a[0].length);
+
 function parseNumber(text: string): number | null {
-  const t = text.toLowerCase().trim();
+  const t = normalizeGreek(text);
   const digits = t.match(/\d+/);
   if (digits) return parseInt(digits[0], 10);
-  for (const [word, num] of Object.entries(GREEK_NUMBERS)) {
-    if (t.includes(word)) return num;
+  for (const [word, num] of SORTED_NUMBER_ENTRIES) {
+    if (t.includes(normalizeGreek(word))) return num;
   }
   return null;
 }
@@ -51,13 +52,12 @@ function parseNumber(text: string): number | null {
 function isYes(text: string): boolean {
   const t = normalizeGreek(text);
   return t.includes('ναι') || t === 'ν' ||
-         t.includes('εννεα') || t.includes('εννια') ||
-         t.includes('μαλιστα');
+         t.includes('μαλιστα') || t.includes('βεβαια') || t.includes('σωστα');
 }
 
 function isNo(text: string): boolean {
   const t = normalizeGreek(text);
-  return t.includes('οχι');
+  return t.includes('οχι') || t.includes('τιποτα');
 }
 
 function isSkip(text: string): boolean {
@@ -66,8 +66,7 @@ function isSkip(text: string): boolean {
 }
 
 export function isWakeWord(text: string): boolean {
-  const t = normalizeGreek(text);
-  return t.includes('ετοιμ');
+  return normalizeGreek(text).includes('ετοιμ');
 }
 
 export function isStopWord(text: string): boolean {
@@ -80,25 +79,18 @@ export function isFinalEnd(text: string): boolean {
   return t.includes('οριστικο τελος') || t.includes('οριστικοτελος');
 }
 
-// ─── RECORDING OPTIONS ──────────────────────────────────────────────────────
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
   android: {
     extension: '.m4a',
     outputFormat: Audio.AndroidOutputFormat.MPEG_4,
     audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 16_000,
-    numberOfChannels: 1,
-    bitRate: 64_000,
+    sampleRate: 16_000, numberOfChannels: 1, bitRate: 64_000,
   },
   ios: {
     extension: '.m4a',
     audioQuality: Audio.IOSAudioQuality.MEDIUM,
-    sampleRate: 16_000,
-    numberOfChannels: 1,
-    bitRate: 64_000,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
+    sampleRate: 16_000, numberOfChannels: 1, bitRate: 64_000,
+    linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false,
   },
   web: { mimeType: 'audio/webm', bitsPerSecond: 64_000 },
 };
@@ -109,27 +101,22 @@ const STT_PROMPT =
   'ένα, δύο, τρία, τέσσερα, πέντε, έξι, επτά, οκτώ, εννέα, δέκα, ' +
   'τέλος, οριστικό τέλος, κυψέλη, πλαίσια';
 
+const BEEP_URL = 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg';
+
 function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ─── TYPES ──────────────────────────────────────────────────────────────────
+// ─── TYPES ───────────────────────────────────────────────────────────────────
+
 export interface GuidedInspectionResult {
-  hive_id:           string;
-  hive_name:         string;
-  population_frames: number | null;
-  brood_frames:      number | null;
-  honey_frames:      number | null;
-  queen_present:     boolean | null;
-  queen_status:      string | null;
-  queen_cells:       number | null;
-  temperament:       string | null;
-  has_swarmed:       boolean;
-  feeding_type:      string | null;
-  feeding_label:     string | null;
-  notes:             string | null;
-  urgent:            boolean;
-  is_dead:           boolean;
+  hive_id: string; hive_name: string;
+  population_frames: number | null; brood_frames: number | null;
+  honey_frames: number | null; queen_present: boolean | null;
+  queen_status: string | null; queen_cells: number | null;
+  temperament: string | null; has_swarmed: boolean;
+  feeding_type: string | null; feeding_label: string | null;
+  notes: string | null; urgent: boolean; is_dead: boolean;
 }
 
 export interface GuidedSessionCallbacks {
@@ -146,12 +133,14 @@ export interface GuidedSessionCallbacks {
   getHiveByNumber: (num: number) => { id: string; name: string } | null;
 }
 
-type AskResult =
-  | { kind: 'ok'; text: string }
-  | { kind: 'failed' }   // 3 αποτυχίες
-  | { kind: 'paused' };  // είπε "στοπ"
+// Τύποι επιστροφής — χωριστοί για number και boolean ώστε να μην μπερδεύεται το TS
+type NumResult   = { kind: 'ok'; value: number | null } | { kind: 'paused' } | { kind: 'ended' };
+type BoolResult  = { kind: 'ok'; value: boolean | null } | { kind: 'paused' } | { kind: 'ended' };
+type AskResult   = { kind: 'ok'; text: string } | { kind: 'failed' } | { kind: 'paused' } | { kind: 'ended' };
+type SessionOutcome = 'done' | 'ended';
 
-// ─── GUIDED SESSION ─────────────────────────────────────────────────────────
+// ─── CLASS ───────────────────────────────────────────────────────────────────
+
 export class GuidedVoiceSession {
   private running  = false;
   private stop     = false;
@@ -159,6 +148,10 @@ export class GuidedVoiceSession {
   private cb: GuidedSessionCallbacks | null = null;
   private savedCount = 0;
   private activeRecording: Audio.Recording | null = null;
+  private gen = 0;
+  private resumeCallback: (() => void) | null = null;
+
+  private dead(g: number): boolean { return this.stop || g !== this.gen; }
 
   private async setPlayback(): Promise<void> {
     try {
@@ -180,8 +173,22 @@ export class GuidedVoiceSession {
     } catch {}
   }
 
-  private async speak(text: string): Promise<void> {
-    if (this.stop) return;
+  // Beep ΠΡΙΝ την ηχογράφηση — τελείως χωριστό από το Recording object
+  private async beep(): Promise<void> {
+    try {
+      await this.setPlayback();
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: BEEP_URL }, { shouldPlay: true, volume: 1.0 }
+      );
+      await delay(400);
+      await sound.unloadAsync();
+    } catch {}
+    await this.setRecording();
+    await delay(200);
+  }
+
+  private async speak(g: number, text: string): Promise<void> {
+    if (this.dead(g)) return;
     await this.setPlayback();
     await new Promise<void>(resolve => {
       const done = (): void => { setTimeout(resolve, 200); };
@@ -196,9 +203,11 @@ export class GuidedVoiceSession {
     await delay(150);
   }
 
-  private async record(durationMs: number, minBytes = 1000): Promise<string> {
-    if (this.stop) return '';
+  private async record(g: number, durationMs: number): Promise<string> {
+    if (this.dead(g)) return '';
     this.cb?.onListening();
+    await this.beep();
+    if (this.dead(g)) return '';
     let uri: string | null = null;
     try {
       const rec = new Audio.Recording();
@@ -206,7 +215,7 @@ export class GuidedVoiceSession {
       this.activeRecording = rec;
       await rec.startAsync();
       await delay(durationMs);
-      if (this.stop) {
+      if (this.dead(g)) {
         await rec.stopAndUnloadAsync().catch(() => {});
         this.activeRecording = null;
         return '';
@@ -214,15 +223,8 @@ export class GuidedVoiceSession {
       await rec.stopAndUnloadAsync();
       this.activeRecording = null;
       uri = rec.getURI() ?? null;
-    } catch {
-      this.activeRecording = null;
-      return '';
-    }
+    } catch { this.activeRecording = null; return ''; }
     if (!uri) return '';
-    try {
-      const info = await FileSystem.getInfoAsync(uri);
-      if (!info.exists || ('size' in info && info.size < minBytes)) return '';
-    } catch {}
     try {
       const fd = new FormData();
       fd.append('file', { uri, type: 'audio/mp4', name: 'rec.m4a' } as any);
@@ -230,13 +232,13 @@ export class GuidedVoiceSession {
       fd.append('language', 'el');
       fd.append('prompt', STT_PROMPT);
       const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-        body: fd,
+        method: 'POST', headers: { Authorization: `Bearer ${this.apiKey}` }, body: fd,
       });
+      if (this.dead(g)) return '';
       if (!res.ok) {
         if (res.status >= 500) {
           await delay(1200);
+          if (this.dead(g)) return '';
           const res2 = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST', headers: { Authorization: `Bearer ${this.apiKey}` }, body: fd,
           });
@@ -250,71 +252,88 @@ export class GuidedVoiceSession {
     finally { try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {} }
   }
 
-  // ── Ερώτηση με 3 προσπάθειες ────────────────────────────
-  private async ask(question: string, durationMs = 3500): Promise<AskResult> {
+  // ── Βασικές ask functions ────────────────────────────────
+
+  private async ask(g: number, question: string, durationMs = 3500): Promise<AskResult> {
     this.cb?.onQuestion(question);
-    await this.speak(question);
-    for (let attempt = 1; attempt <= 3 && !this.stop; attempt++) {
-      const text = await this.record(durationMs);
+    await this.speak(g, question);
+    for (let attempt = 1; attempt <= 3 && !this.dead(g); attempt++) {
+      const text = await this.record(g, durationMs);
       if (text) {
+        if (isFinalEnd(text)) return { kind: 'ended' };
         if (isStopWord(text)) return { kind: 'paused' };
         this.cb?.onAnswer(text);
         return { kind: 'ok', text };
       }
-      if (attempt < 3) await this.speak('Επανέλαβε, δεν κατάλαβα.');
+      if (attempt < 3) await this.speak(g, 'Επανέλαβε, δεν κατάλαβα.');
     }
     return { kind: 'failed' };
   }
 
-  private async askNumber(question: string, fieldLabel: string): Promise<number | null | 'PAUSED'> {
-    const res = await this.ask(question, 3500);
-    if (res.kind === 'paused') return 'PAUSED';
+  // Ερώτηση αριθμού — επιστρέφει NumResult (χωρίς PAUSED στον τύπο του value)
+  private async askNumber(g: number, question: string, fieldLabel: string): Promise<NumResult> {
+    const res = await this.ask(g, question, 3500);
+    if (res.kind === 'ended')  return { kind: 'ended' };
+    if (res.kind === 'paused') return { kind: 'paused' };
     if (res.kind === 'failed') {
-      await this.speak(`${fieldLabel} δεν αποθηκεύτηκε.`);
-      return null;
+      await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+      return { kind: 'ok', value: null };
     }
     let n = parseNumber(res.text);
     if (n === null) {
-      // Άκουσε κάτι αλλά όχι αριθμό — 2 ακόμα προσπάθειες
-      for (let i = 0; i < 2 && n === null && !this.stop; i++) {
-        await this.speak('Επανέλαβε, δεν κατάλαβα.');
-        const t2 = await this.record(3500);
+      for (let i = 0; i < 2 && n === null && !this.dead(g); i++) {
+        await this.speak(g, 'Επανέλαβε, δεν κατάλαβα.');
+        const t2 = await this.record(g, 3500);
         if (t2) {
-          if (isStopWord(t2)) return 'PAUSED';
+          if (isFinalEnd(t2)) return { kind: 'ended' };
+          if (isStopWord(t2)) return { kind: 'paused' };
           this.cb?.onAnswer(t2);
           n = parseNumber(t2);
         }
       }
-      if (n === null) await this.speak(`${fieldLabel} δεν αποθηκεύτηκε.`);
+      if (n === null) await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
     }
-    return n;
+    return { kind: 'ok', value: n };
   }
 
-  private async askYesNo(question: string, fieldLabel: string): Promise<boolean | null | 'PAUSED'> {
-    const res = await this.ask(question, 3000);
-    if (res.kind === 'paused') return 'PAUSED';
+  // Ερώτηση ναι/όχι — επιστρέφει BoolResult
+  private async askYesNo(g: number, question: string, fieldLabel: string): Promise<BoolResult> {
+    const res = await this.ask(g, question, 3000);
+    if (res.kind === 'ended')  return { kind: 'ended' };
+    if (res.kind === 'paused') return { kind: 'paused' };
     if (res.kind === 'failed') {
-      await this.speak(`${fieldLabel} δεν αποθηκεύτηκε.`);
-      return null;
+      await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+      return { kind: 'ok', value: null };
     }
-    if (isYes(res.text)) return true;
-    if (isNo(res.text))  return false;
-    // Άκουσε κάτι ασαφές — 2 ακόμα προσπάθειες
-    for (let i = 0; i < 2 && !this.stop; i++) {
-      await this.speak('Επανέλαβε, ναι ή όχι.');
-      const t2 = await this.record(3000);
+    if (isYes(res.text)) return { kind: 'ok', value: true };
+    if (isNo(res.text))  return { kind: 'ok', value: false };
+    for (let i = 0; i < 2 && !this.dead(g); i++) {
+      await this.speak(g, 'Επανέλαβε, ναι ή όχι.');
+      const t2 = await this.record(g, 3000);
       if (t2) {
-        if (isStopWord(t2)) return 'PAUSED';
+        if (isFinalEnd(t2)) return { kind: 'ended' };
+        if (isStopWord(t2)) return { kind: 'paused' };
         this.cb?.onAnswer(t2);
-        if (isYes(t2)) return true;
-        if (isNo(t2))  return false;
+        if (isYes(t2)) return { kind: 'ok', value: true };
+        if (isNo(t2))  return { kind: 'ok', value: false };
       }
     }
-    await this.speak(`${fieldLabel} δεν αποθηκεύτηκε.`);
-    return null;
+    await this.speak(g, `${fieldLabel} δεν αποθηκεύτηκε.`);
+    return { kind: 'ok', value: null };
   }
 
-  // ── START — αμέσως ενεργό ───────────────────────────────
+  // Helper: αδράνεια + επανέναρξη όταν πει "έτοιμος"
+  private async doPause(g: number, msg: string): Promise<boolean> {
+    await this.speak(g, msg);
+    await new Promise<void>(resolve => {
+      this.resumeCallback = () => resolve();
+      this.pausedLoop(g);
+    });
+    return this.dead(g); // επιστρέφει true αν πρέπει να σταματήσουμε
+  }
+
+  // ── START ─────────────────────────────────────────────────
+
   async start(cb: GuidedSessionCallbacks): Promise<void> {
     if (this.running) return;
     const key = process.env.EXPO_PUBLIC_OPENAI_KEY ?? '';
@@ -323,89 +342,92 @@ export class GuidedVoiceSession {
     if (status !== 'granted') { cb.onError('Δεν δόθηκε άδεια μικροφώνου'); return; }
     this.running = true; this.stop = false;
     this.apiKey = key; this.cb = cb; this.savedCount = 0;
+    this.resumeCallback = null;
+    const g = ++this.gen;
     await this.setRecording();
-    this.activeLoop(true);
+    this.waitForHive(g);
   }
 
-  // ── PAUSED — ακούει μόνο "έτοιμος"/"οριστικό τέλος" ─────
-  private async pausedLoop(): Promise<void> {
+  // ── ΑΔΡΑΝΕΙΑ ─────────────────────────────────────────────
+
+  private async pausedLoop(g: number): Promise<void> {
     this.cb?.onStateChange('paused');
-    while (!this.stop) {
-      const text = await this.record(2_500, 800);
+    while (!this.dead(g)) {
+      const text = await this.record(g, 2_500);
       if (!text) continue;
-
-      if (isFinalEnd(text)) { await this.finishSession(); return; }
-
+      if (isFinalEnd(text)) { await this.finishSession(g); return; }
       if (isWakeWord(text)) {
         this.cb?.onAnswer(text);
-        this.activeLoop(true);
+        if (this.resumeCallback) {
+          const resume = this.resumeCallback;
+          this.resumeCallback = null;
+          resume();
+        } else {
+          this.waitForHive(g);
+        }
         return;
       }
     }
   }
 
-  // ── ACTIVE — ζητάει αριθμό κυψέλης ─────────────────────
-  private async activeLoop(announceFirst: boolean): Promise<void> {
-    this.cb?.onStateChange('waiting_hive');
-    if (announceFirst) await this.speak('Πείτε αριθμό κυψέλης.');
+  // ── ΑΝΑΜΟΝΗ ΚΥΨΕΛΗΣ ──────────────────────────────────────
 
+  private async waitForHive(g: number): Promise<void> {
+    this.cb?.onStateChange('waiting_hive');
+    this.resumeCallback = null;
+    await this.speak(g, 'Πείτε αριθμό κυψέλης.');
     let emptyCount = 0;
-    while (!this.stop) {
-      const text = await this.record(3_500);
+    while (!this.dead(g)) {
+      const text = await this.record(g, 3_500);
       if (!text) {
         emptyCount++;
         if (emptyCount >= 3) {
-          // Δεν ακούει κανέναν → αδράνεια
-          await this.speak('Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-          this.pausedLoop();
+          this.resumeCallback = () => this.waitForHive(g);
+          await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
           return;
         }
         continue;
       }
       emptyCount = 0;
-
       if (isStopWord(text)) {
-        await this.speak('Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-        this.pausedLoop();
+        this.resumeCallback = () => this.waitForHive(g);
+        await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
         return;
       }
-
-      if (isFinalEnd(text)) { await this.finishSession(); return; }
-
+      if (isFinalEnd(text)) { await this.finishSession(g); return; }
       this.cb?.onAnswer(text);
-
       const num = parseNumber(text);
       if (num !== null && num > 0) {
         const hive = this.cb?.getHiveByNumber(num);
         if (hive) {
           this.cb?.onHiveStart(hive.name);
           this.cb?.onStateChange('recording');
-          const paused = await this.runInspection(hive.id, hive.name, num);
-          if (this.stop) return;
-          if (paused) {
-            await this.speak('Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-          } else {
-            // Μετά από κάθε κυψέλη → αδράνεια
-            await this.speak('Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
-          }
-          this.pausedLoop();
+          const outcome = await this.runInspection(g, hive.id, hive.name, num);
+          if (this.dead(g)) return;
+          if (outcome === 'ended') { await this.finishSession(g); return; }
+          this.resumeCallback = () => this.waitForHive(g);
+          await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
           return;
         } else {
-          await this.speak(`Δεν βρήκα κυψέλη ${num}. Ξαναπείτε.`);
+          await this.speak(g, `Δεν βρήκα κυψέλη ${num}. Ξαναπείτε.`);
         }
       }
     }
   }
 
-  private async finishSession(): Promise<void> {
-    await this.speak(`Τέλος. ${this.savedCount} κυψέλες καταγράφηκαν.`);
+  private async finishSession(g: number): Promise<void> {
+    await this.speak(g, `Τέλος. ${this.savedCount} κυψέλες καταγράφηκαν.`);
     this.cb?.onStateChange('finished');
     this.cb?.onFinished(this.savedCount);
     this.running = false;
   }
 
-  // ── INSPECTION FLOW ─────────────────────────────────────
-  private async runInspection(hiveId: string, hiveName: string, hiveNum: number): Promise<boolean> {
+  // ── INSPECTION FLOW ───────────────────────────────────────
+  // Κάθε ερώτηση: αν PAUSED → αδράνεια → "έτοιμος" → επαναλαμβάνεται η ΙΔΙΑ ερώτηση
+
+  private async runInspection(
+    g: number, hiveId: string, hiveName: string, hiveNum: number,
+  ): Promise<SessionOutcome> {
     const result: GuidedInspectionResult = {
       hive_id: hiveId, hive_name: hiveName,
       population_frames: null, brood_frames: null, honey_frames: null,
@@ -415,86 +437,119 @@ export class GuidedVoiceSession {
       notes: null, urgent: false, is_dead: false,
     };
 
-    let pauseRequested = false;
+    // Helper: επανάληψη ερώτησης αριθμού μέχρι να πάρουμε ok ή ended
+    const getNum = async (question: string, label: string): Promise<{ value: number | null } | 'ended'> => {
+      while (!this.dead(g)) {
+        const r = await this.askNumber(g, question, label);
+        if (r.kind === 'ended') return 'ended';
+        if (r.kind === 'ok')    return { value: r.value };
+        // paused: αδράνεια, μετά επανάληψη
+        const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
+        if (stopped) return 'ended';
+      }
+      return 'ended';
+    };
 
-    // 1. Πληθυσμός
-    const pop = await this.askNumber(`Κυψέλη ${hiveNum}. Πόσα πλαίσια πληθυσμός;`, 'Ο πληθυσμός');
-    if (pop === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    if (pop === 0) {
+    // Helper: επανάληψη ερώτησης ναι/όχι μέχρι να πάρουμε ok ή ended
+    const getBool = async (question: string, label: string): Promise<{ value: boolean | null } | 'ended'> => {
+      while (!this.dead(g)) {
+        const r = await this.askYesNo(g, question, label);
+        if (r.kind === 'ended') return 'ended';
+        if (r.kind === 'ok')    return { value: r.value };
+        const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
+        if (stopped) return 'ended';
+      }
+      return 'ended';
+    };
+
+    // ── 1. Πληθυσμός ─────────────────────────────────────────
+    const pop = await getNum(`Κυψέλη ${hiveNum}. Πόσα πλαίσια πληθυσμός;`, 'Ο πληθυσμός');
+    if (pop === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (pop.value === 0) {
       result.is_dead = true; result.population_frames = 0;
       result.urgent = true; result.notes = 'Νεκρό μελίσσι';
-      await this.speak(`Κυψέλη ${hiveNum} νεκρή.`);
       this.cb?.onHiveDead(hiveName);
-      try { await this.cb?.saveInspection(result); } catch {}
-      return false;
+      this.cb?.onStateChange('processing');
+      try {
+        await this.cb?.saveInspection(result);
+        this.savedCount++;
+        await this.speak(g, `Κυψέλη ${hiveNum} νεκρή. Καταγράφηκε.`);
+      } catch (e: any) {
+        this.cb?.onError(`Σφάλμα: ${e?.message ?? 'άγνωστο'}`);
+        await this.speak(g, 'Σφάλμα αποθήκευσης.');
+      }
+      return 'done';
     }
-    result.population_frames = pop;
+    result.population_frames = pop.value;
 
-    // 2. Γόνος
-    const brood = await this.askNumber('Πόσα πλαίσια γόνος;', 'Ο γόνος');
-    if (brood === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    result.brood_frames = brood;
+    // ── 2. Γόνος ─────────────────────────────────────────────
+    const brood = await getNum('Πόσα πλαίσια γόνος;', 'Ο γόνος');
+    if (brood === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    result.brood_frames = brood.value;
 
-    // 3. Μέλι
-    const honey = await this.askNumber('Πόσα πλαίσια μέλι;', 'Το μέλι');
-    if (honey === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    result.honey_frames = honey;
+    // ── 3. Μέλι ──────────────────────────────────────────────
+    const honey = await getNum('Πόσα πλαίσια μέλι;', 'Το μέλι');
+    if (honey === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    result.honey_frames = honey.value;
 
-    // 4. Βασίλισσα
-    const queenPresent = await this.askYesNo('Βασίλισσα παρούσα;', 'Η βασίλισσα');
-    if (queenPresent === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    result.queen_present = queenPresent;
-    if (queenPresent === false) {
-      const dayBrood = await this.askYesNo('Είδες γόνο ημέρας;', 'Ο γόνος ημέρας');
-      if (dayBrood === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-      if (dayBrood === true) {
-        result.queen_status = 'Δεν εντοπίστηκε';
-      } else if (dayBrood === false) {
-        result.queen_status = 'Ορφανό';
-        result.urgent = true;
-        result.notes = 'Ορφανό μελίσσι';
+    // ── 4. Βασίλισσα ─────────────────────────────────────────
+    const queenPresent = await getBool('Βασίλισσα παρούσα;', 'Η βασίλισσα');
+    if (queenPresent === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    result.queen_present = queenPresent.value;
+    if (queenPresent.value === false) {
+      const dayBrood = await getBool('Είδες γόνο ημέρας;', 'Ο γόνος ημέρας');
+      if (dayBrood === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+      if (dayBrood.value === true)  result.queen_status = 'Δεν εντοπίστηκε';
+      if (dayBrood.value === false) {
+        result.queen_status = 'Ορφανό'; result.urgent = true; result.notes = 'Ορφανό μελίσσι';
       }
     }
 
-    // 5. Βασιλικά κελιά
-    const hasCells = await this.askYesNo('Βασιλικά κελιά;', 'Τα κελιά');
-    if (hasCells === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    if (hasCells === true) {
-      const cells = await this.askNumber('Πόσα;', 'Τα κελιά');
-      if (cells === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-      result.queen_cells = cells;
-    } else if (hasCells === false) {
+    // ── 5. Βασιλικά κελιά ────────────────────────────────────
+    const hasCells = await getBool('Βασιλικά κελιά;', 'Τα κελιά');
+    if (hasCells === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (hasCells.value === true) {
+      const cells = await getNum('Πόσα;', 'Τα κελιά');
+      if (cells === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+      result.queen_cells = cells.value;
+    } else {
       result.queen_cells = 0;
     }
 
-    // 6. Ιδιοσυγκρασία
-    const calm = await this.askYesNo('Ήρεμο μελίσσι;', 'Η ιδιοσυγκρασία');
-    if (calm === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    if (calm === true)       result.temperament = 'ήρεμο';
-    else if (calm === false) result.temperament = 'επιθετικό';
+    // ── 6. Ιδιοσυγκρασία ─────────────────────────────────────
+    const calm = await getBool('Ήρεμο μελίσσι;', 'Η ιδιοσυγκρασία');
+    if (calm === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    if (calm.value === true)  result.temperament = 'ήρεμο';
+    if (calm.value === false) result.temperament = 'επιθετικό';
 
-    // 7. Σμηνουργία
-    const swarm = await this.askYesNo('Τάση σμηνουργίας;', 'Η σμηνουργία');
-    if (swarm === 'PAUSED') { await this.saveResult(result, hiveNum, hiveName); return true; }
-    result.has_swarmed = swarm === true;
+    // ── 7. Σμηνουργία ────────────────────────────────────────
+    const swarm = await getBool('Τάση σμηνουργίας;', 'Η σμηνουργία');
+    if (swarm === 'ended') { await this.saveResult(g, result, hiveNum, hiveName); return 'ended'; }
+    result.has_swarmed = swarm.value === true;
 
-    // 8. Σημειώσεις
+    // ── 8. Σημειώσεις ────────────────────────────────────────
     this.cb?.onQuestion('Σημειώσεις;');
-    await this.speak('Σημειώσεις; Παράλειψη ή μιλήστε και πείτε τέλος.');
+    await this.speak(g, 'Σημειώσεις; Παράλειψη ή μιλήστε και πείτε τέλος.');
     let notesText = '';
-    let done = false;
-    let empty = 0;
-    while (!done && !this.stop) {
-      const chunk = await this.record(5000);
-      if (!chunk) { empty++; if (empty >= 2) done = true; continue; }
-      if (isStopWord(chunk)) { pauseRequested = true; done = true; continue; }
+    let notesDone = false;
+    let notesEmpty = 0;
+    while (!notesDone && !this.dead(g)) {
+      const chunk = await this.record(g, 5000);
+      if (!chunk) { notesEmpty++; if (notesEmpty >= 2) notesDone = true; continue; }
+      if (isFinalEnd(chunk)) { notesDone = true; break; }
+      if (isStopWord(chunk)) {
+        const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια σημειώσεων.');
+        if (stopped) { notesDone = true; break; }
+        await this.speak(g, 'Συνεχίστε σημειώσεις ή πείτε τέλος.');
+        continue;
+      }
       this.cb?.onAnswer(chunk);
       if (isSkip(chunk)) {
-        done = true;
+        notesDone = true;
       } else if (normalizeGreek(chunk).includes('τελος')) {
         const before = normalizeGreek(chunk).replace(/τελος/g, '').trim();
         if (before) notesText += ' ' + before;
-        done = true;
+        notesDone = true;
       } else {
         notesText += ' ' + chunk;
       }
@@ -503,25 +558,30 @@ export class GuidedVoiceSession {
       result.notes = (result.notes ? result.notes + '. ' : '') + notesText.trim();
     }
 
-    await this.saveResult(result, hiveNum, hiveName);
-    return pauseRequested;
+    await this.saveResult(g, result, hiveNum, hiveName);
+    return 'done';
   }
 
-  private async saveResult(result: GuidedInspectionResult, hiveNum: number, hiveName: string): Promise<void> {
+  private async saveResult(
+    g: number, result: GuidedInspectionResult, hiveNum: number, hiveName: string,
+  ): Promise<void> {
     this.cb?.onStateChange('processing');
     try {
       await this.cb?.saveInspection(result);
       this.savedCount++;
       this.cb?.onHiveSaved(hiveName, this.savedCount);
-      await this.speak(`Κυψέλη ${hiveNum} αποθηκεύτηκε.`);
+      await this.speak(g, `Κυψέλη ${hiveNum} αποθηκεύτηκε.`);
     } catch (e: any) {
-      this.cb?.onError(`Σφάλμα: ${e.message}`);
-      await this.speak('Σφάλμα αποθήκευσης.');
+      this.cb?.onError(`Σφάλμα: ${e?.message ?? 'άγνωστο'}`);
+      await this.speak(g, 'Σφάλμα αποθήκευσης.');
     }
   }
 
   reset(): void {
-    this.stop = true; this.running = false;
+    this.gen++;
+    this.stop = true;
+    this.running = false;
+    this.resumeCallback = null;
     Speech.stop();
     if (this.activeRecording) {
       this.activeRecording.stopAndUnloadAsync().catch(() => {});

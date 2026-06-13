@@ -133,6 +133,32 @@ async function speakHarvest(text: string): Promise<void> {
 }
 
 async function recordHarvest(apiKey: string, durationMs: number, minBytes = 1000): Promise<string> {
+  // 1. BEEP ΠΡΩΤΑ — πριν δημιουργηθεί καν το Recording object
+  try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false, playsInSilentModeIOS: true,
+      shouldDuckAndroid: true, playThroughEarpieceAndroid: false,
+      staysActiveInBackground: false,
+    });
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg' },
+      { shouldPlay: true, volume: 1.0 }
+    );
+    await new Promise(r => setTimeout(r, 400));
+    await sound.unloadAsync();
+  } catch {}
+
+  // 2. Audio mode σε recording
+  try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true, playsInSilentModeIOS: true,
+      shouldDuckAndroid: true, playThroughEarpieceAndroid: false,
+      staysActiveInBackground: false,
+    });
+  } catch {}
+  await new Promise(r => setTimeout(r, 200));
+
+  // 3. Ηχογράφηση — καθαρή, χωρίς καμία παρέμβαση
   let uri: string | null = null;
   try {
     const rec = new Audio.Recording();
@@ -141,11 +167,15 @@ async function recordHarvest(apiKey: string, durationMs: number, minBytes = 1000
     await new Promise<void>(r => setTimeout(r, durationMs));
     await rec.stopAndUnloadAsync();
     uri = rec.getURI() ?? null;
-  } catch { return ''; }
+    
+    
+  } catch (e: any) {
+    Alert.alert('CATCH ERROR', e?.message ?? 'άγνωστο σφάλμα');
+    return '';
+  }
   if (!uri) return '';
   try {
-    const info = await FileSystem.getInfoAsync(uri);
-    if (!info.exists || ('size' in info && info.size < minBytes)) return '';
+    
     const fd = new FormData();
     fd.append('file', { uri, type: 'audio/mp4', name: 'rec.m4a' } as any);
     fd.append('model', STT_MODEL);
@@ -240,12 +270,15 @@ export default function InspectionScreen({ route, navigation }: any) {
   }, []);
 
   const getHiveByNumber = useCallback((num: number | string) => {
-    const numStr = String(num).toLowerCase().trim();
-    const h = hivesRef.current.find(
-      hv => hv.name.toLowerCase().trim() === numStr || hv.name.toLowerCase().includes(numStr),
-    );
-    return h ? { id: h.id, name: h.name } : null;
-  }, []);
+  const numStr = String(num).trim();
+  const h = hivesRef.current.find(hv => {
+    const name = hv.name.trim();
+    if (name === numStr) return true;          // ακριβές ταίριασμα
+    const m = name.match(/\d+/);               // ο αριθμός μέσα στο όνομα
+    return m ? m[0] === numStr : false;        // "Κυψέλη 12" ≠ "2"
+  });
+  return h ? { id: h.id, name: h.name } : null;
+}, []);
 
   const togDis = (d: string) =>
     setDis(p => p.includes(d) ? p.filter((x: string) => x !== d) : [...p, d]);
@@ -422,9 +455,13 @@ export default function InspectionScreen({ route, navigation }: any) {
       }, 1000);
     },
     saveInspection: async (result: GuidedInspectionResult) => {
-      if (result.is_dead) {
-        try { await updateHive(result.hive_id, { status: 'dead' }); } catch {}
-      }
+  if (result.is_dead) {
+    try {
+      await updateHive(result.hive_id, { status: 'dead' });
+      const fresh = await getHives();
+      setHives(fresh); hivesRef.current = fresh;
+    } catch {}
+  }
       await createInspection({
         hive_id: result.hive_id, date: new Date().toISOString(), mode: 'guided',
         population_frames: result.population_frames ?? null, population_strength: null,
@@ -699,7 +736,8 @@ export default function InspectionScreen({ route, navigation }: any) {
                 { value: 'Μέτρια',             label: '😐 Μέτρια'             },
                 { value: 'κακή',               label: '❌ Κακή'               },
                 { value: 'Δεν εντοπίστηκε',    label: '🔍 Δεν εντοπίστηκε'   },
-                { value: 'Προς Αντικατάσταση', label: '🔄 Προς Αντικατάσταση' },
+                { value: 'Σμηνουργίας',     label: '🐝 Σμηνουργίας'     },
+                { value: 'Ορφανό',          label: '⚠️ Ορφανό'          },
               ]} val={qs} onSel={setQs} />
               <Lbl text="Ωοτοκία" />
               <Chips opts={[

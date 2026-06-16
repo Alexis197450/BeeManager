@@ -64,3 +64,24 @@ export async function deleteHarvest(id: string): Promise<void> {
   const { error } = await supabase.from('harvests').delete().eq('id', id);
   if (error) throw error;
 }
+export interface HarvestWithHive extends Harvest {
+  hive_name: string;
+}
+
+export async function getAllHarvests(limit = 500): Promise<HarvestWithHive[]> {
+  const { data, error } = await supabase
+    .from('harvests')
+    .select(`*, hives ( name )`)
+    .order('date', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ ...r, hive_name: r.hives?.name ?? '—' }));
+}
+
+export async function updateHarvest(
+  id: string,
+  input: Partial<CreateHarvestInput>,
+): Promise<void> {
+  const { error } = await supabase.from('harvests').update(input).eq('id', id);
+  if (error) throw error;
+}

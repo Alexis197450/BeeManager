@@ -22,6 +22,8 @@ import AddSaleScreen        from './app/screens/finance/AddSaleScreen';
 import AddExpenseScreen     from './app/screens/finance/AddExpenseScreen';
 import AddAssetScreen       from './app/screens/finance/AddAssetScreen';
 import ProductionCostScreen from './app/screens/finance/ProductionCostScreen';
+import InspectionHistoryScreen from './app/screens/InspectionHistoryScreen';
+import HarvestHistoryScreen    from './app/screens/HarvestHistoryScreen';
 
 // ─── TYPE DEFINITIONS ─────────────────────────────────────────────────────
 export type RootStackParamList = {
@@ -32,7 +34,7 @@ export type RootStackParamList = {
   Nucleus:       undefined;
   Apiaries:      undefined;
   HiveDetail:    { hive_id: string; hive_name: string };
-  Inspection:    { hive_id?: string; hive_name?: string; mode?: 'guided' | 'free'; autoRecord?: boolean };
+  Inspection:    { hive_id?: string; hive_name?: string; mode?: 'guided' | 'free' | 'manual'; autoRecord?: boolean; editInspection?: any };
   Finance:       undefined;
   CreateProduct: undefined;
   AddExpense:    { year: number };
@@ -40,6 +42,8 @@ export type RootStackParamList = {
   AddProduction: { year: number };
   AddSale:       { year: number };
   ProductionCost:{ year: number };
+  InspectionHistory: undefined;
+  HarvestHistory:    undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -67,6 +71,8 @@ function AppNavigator() {
           <Stack.Screen name="Queen"      component={QueenScreen}      options={{ title: '👑 Βασιλοτροφία' }} />
           <Stack.Screen name="Nucleus"    component={NucleusScreen}    options={{ title: '🐝 Παραφυάδες' }} />
           <Stack.Screen name="HiveDetail" component={HiveDetailScreen} options={{ title: '🐝 Κυψέλη' }} />
+          <Stack.Screen name="InspectionHistory" component={InspectionHistoryScreen} options={{ title: '📋 Ιστορικό Επιθεωρήσεων' }} />
+          <Stack.Screen name="HarvestHistory"    component={HarvestHistoryScreen}    options={{ title: '🍯 Ιστορικό Τρύγου' }} />
 
           {/* ── Finance ── */}
           <Stack.Screen name="Finance"        component={FinanceScreen}        options={{ title: '💰 Οικονομικά' }} />

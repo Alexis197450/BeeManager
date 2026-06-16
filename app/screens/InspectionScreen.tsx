@@ -1,4 +1,6 @@
-// app/screens/InspectionScreen.tsx — v5.3
+// app/screens/InspectionScreen.tsx — v6.3
+// Direct save (όπως ο τρύγος) + Edit mode από Ιστορικό
+
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
@@ -7,7 +9,7 @@ import {
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import * as FileSystem from 'expo-file-system';
-import { createInspection, getHives, getInspectionsByHive, updateHive } from '../services/inspectionService';
+import { createInspection, getHives, getInspectionsByHive, updateHive, updateInspection } from '../services/inspectionService';
 import { createHarvest } from '../services/harvestService';
 import {
   BROOD_CONDITION_OPTIONS, DISEASES_OPTIONS, EQUIPMENT_STATUS_OPTIONS,
@@ -40,23 +42,18 @@ const GREEK_NUMBERS: Record<string, number> = {
   'δεκαεπτά': 17, 'δεκαεπτα': 17, 'δεκαοκτώ': 18, 'δεκαοκτω': 18,
   'δεκαεννέα': 19, 'δεκαεννεα': 19, 'είκοσι': 20, 'εικοσι': 20,
 };
-
 function parseNum(text: string): number | null {
   const t = text.toLowerCase().trim();
   const d = t.match(/\d+/);
   if (d) return parseInt(d[0], 10);
-  for (const [w, n] of Object.entries(GREEK_NUMBERS)) {
-    if (t.includes(w)) return n;
-  }
+  for (const [w, n] of Object.entries(GREEK_NUMBERS)) if (t.includes(w)) return n;
   return null;
 }
 
 function SH({ e, t }: { e: string; t: string }) {
   return <View style={s.sh}><Text style={s.se}>{e}</Text><Text style={s.st}>{t}</Text></View>;
 }
-function Lbl({ text }: { text: string }) {
-  return <Text style={s.lbl}>{text}</Text>;
-}
+function Lbl({ text }: { text: string }) { return <Text style={s.lbl}>{text}</Text>; }
 function Chips<T extends string>({ opts, val, onSel }: {
   opts: readonly { value: T; label: string; color?: string; textColor?: string }[];
   val: T | null; onSel: (v: T) => void;
@@ -106,7 +103,7 @@ function Tog({ val, set, on = 'Ναι', off = 'Όχι' }: {
   );
 }
 
-type EntryMode = 'select' | 'voice' | 'harvest' | 'manual' | 'preview';
+type EntryMode = 'select' | 'voice' | 'harvest' | 'manual';
 interface SavedHiveEntry { hiveName: string; savedAt: string; dead?: boolean; frames?: number; }
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
@@ -131,7 +128,6 @@ async function speakHarvest(text: string): Promise<void> {
 }
 
 async function recordHarvest(apiKey: string, durationMs: number): Promise<string> {
-  // BEEP ΠΡΩΤΑ
   try {
     await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false, staysActiveInBackground: false });
     const { sound } = await Audio.Sound.createAsync({ uri: BEEP_URL }, { shouldPlay: true, volume: 1.0 });
@@ -168,8 +164,7 @@ async function recordHarvest(apiKey: string, durationMs: number): Promise<string
 }
 
 export default function InspectionScreen({ route, navigation }: any) {
-  const { hive_id, hive_name, mode = 'guided', autoRecord = false } = route.params ?? {};
-
+  const { hive_id, hive_name, mode = 'guided', autoRecord = false, editInspection } = route.params ?? {};
   const [entryMode, setEntryMode] = useState<EntryMode>(hive_id ? 'manual' : 'select');
   const [hives, setHives]         = useState<Hive[]>([]);
   const hivesRef                  = useRef<Hive[]>([]);
@@ -181,7 +176,6 @@ export default function InspectionScreen({ route, navigation }: any) {
   const [savedHives,      setSavedHives]      = useState<SavedHiveEntry[]>([]);
   const [sessionError,    setSessionError]    = useState('');
   const [savedCount,      setSavedCount]      = useState(0);
-  const [previewResult,   setPreviewResult]   = useState<GuidedInspectionResult | null>(null);
 
   const harvestStop = useRef(false);
   const harvestSavedCount = useRef(0);
@@ -218,6 +212,7 @@ export default function InspectionScreen({ route, navigation }: any) {
   const [nvr, setNvr] = useState('');
   const [urg, setUrg] = useState(false);
   const [notes, setNotes] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(editInspection?.id ?? null);
 
   useEffect(() => {
     getHives().then(h => { setHives(h); hivesRef.current = h; }).catch(() => {});
@@ -239,12 +234,51 @@ export default function InspectionScreen({ route, navigation }: any) {
     return () => clearTimeout(t);
   }, [autoRecord]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       guidedVoiceSession.reset();
       harvestStop.current = true;
     };
   }, []);
+
+  // ═══ EDIT MODE: φόρτωση δεδομένων από editInspection ═══════
+  useEffect(() => {
+    if (!editInspection) return;
+    console.log('[Edit] Loading editInspection id:', editInspection.id);
+    setEditingId(editInspection.id);
+    setEntryMode('manual');
+    setSelectedHiveId(editInspection.hive_id);
+    setSelectedHiveName(editInspection.hive_name ?? '');
+    setDate(editInspection.date?.split('T')[0] ?? new Date().toISOString().split('T')[0]);
+    setPf(editInspection.population_frames ?? 0);
+    setPs(editInspection.population_strength ?? null);
+    setTp(editInspection.temperament ?? null);
+    setSw(editInspection.has_swarmed ?? false);
+    setQp(editInspection.queen_present ?? null);
+    setQs(editInspection.queen_status ?? null);
+    setQl(editInspection.queen_laying ?? null);
+    setQc(editInspection.queen_cells ?? 0);
+    setBf(editInspection.brood_frames ?? 0);
+    setBc(editInspection.brood_condition ?? null);
+    setBt(editInspection.brood_type ?? null);
+    setHf(editInspection.honey_frames ?? 0);
+    setPlf(editInspection.pollen_frames ?? 0);
+    setFt(editInspection.feeding_type ?? 'καμία');
+    setFa(editInspection.feeding_amount ?? 0);
+    setVl(editInspection.varroa_level ?? null);
+    setVm(editInspection.varroa_measurement != null ? String(editInspection.varroa_measurement) : '');
+    setDis(editInspection.diseases ? editInspection.diseases.split(', ').filter(Boolean) : []);
+    setTt(editInspection.treatment_type ?? '');
+    setTd(editInspection.treatment_dose != null ? String(editInspection.treatment_dose) : '');
+    setEs(editInspection.equipment_status ?? null);
+    setEn(editInspection.equipment_notes ?? '');
+    setMa(editInspection.management_actions ?? '');
+    setNv(editInspection.next_visit ?? '');
+    setNvr(editInspection.next_visit_reason ?? '');
+    setUrg(editInspection.urgent ?? false);
+    setNotes(editInspection.notes ?? '');
+  }, [editInspection]);
 
   const getHiveByNumber = useCallback((num: number | string) => {
     const numStr = String(num).trim();
@@ -259,6 +293,56 @@ export default function InspectionScreen({ route, navigation }: any) {
 
   const togDis = (d: string) =>
     setDis(p => p.includes(d) ? p.filter((x: string) => x !== d) : [...p, d]);
+
+  // ═══ DIRECT SAVE από voice ════════════════════════════════
+  const persistVoiceInspection = useCallback(async (r: GuidedInspectionResult): Promise<void> => {
+    const now = new Date().toISOString();
+    await createInspection({
+      hive_id: r.hive_id, date: now, mode: 'guided' as const,
+      population_frames: r.population_frames ?? null,
+      population_strength: null,
+      temperament: r.temperament as any ?? null,
+      has_swarmed: r.has_swarmed ?? false,
+      queen_present: r.queen_present ?? null,
+      queen_status: r.queen_status as any ?? null,
+      queen_laying: null,
+      queen_cells: r.queen_cells ?? null,
+      brood_frames: r.brood_frames ?? null,
+      brood_condition: null, brood_type: null,
+      honey_frames: r.honey_frames ?? null,
+      pollen_frames: null,
+      feeding_type: (r.feeding_type as any) ?? 'καμία',
+      feeding_amount: null,
+      varroa_level: null, varroa_measurement: null,
+      diseases: null, treatment_type: null, treatment_dose: null,
+      equipment_status: null, equipment_notes: null,
+      management_actions: null, next_visit: null, next_visit_reason: null,
+      urgent: r.urgent ?? false,
+      notes: r.notes ?? null,
+      audio_url: null, transcript: null, notifications_disabled: false,
+    });
+    try {
+      await updateHive(r.hive_id, {
+        status: r.is_dead ? 'dead' : 'active',
+        last_inspection_date: now,
+        population_frames: r.population_frames ?? null,
+        brood_frames: r.brood_frames ?? null,
+        honey_frames: r.honey_frames ?? null,
+        queen_present: r.queen_present ?? null,
+        queen_status: r.queen_status ?? null,
+        temperament: r.temperament ?? null,
+        has_swarmed: r.has_swarmed ?? false,
+        urgent: r.urgent ?? false,
+        notes: r.notes ?? null,
+      });
+      if (r.is_dead) {
+        const fresh = await getHives();
+        setHives(fresh); hivesRef.current = fresh;
+      }
+    } catch (e) {
+      console.warn('[Inspection] updateHive failed but inspection saved:', e);
+    }
+  }, []);
 
   // ═══ HARVEST ═══════════════════════════════════════════════
   const startHarvestSession = async () => {
@@ -324,21 +408,24 @@ export default function InspectionScreen({ route, navigation }: any) {
         }
         if (pauseReq) { await speakHarvest('Αδράνεια. Πείτε έτοιμος για συνέχεια.'); harvestPausedLoop(apiKey); return; }
         if (frames !== null) {
-  setVoiceState('processing');
-  try {
-    await createHarvest({ hive_id: hive.id, date: new Date().toISOString(), frames_harvested: frames });
-    await updateHive(hive.id, { last_harvest_date: new Date().toISOString(), last_harvest_frames: frames });
-    harvestSavedCount.current += 1;
-    setSavedCount(harvestSavedCount.current);
-    setSavedHives(sh => [...sh, { hiveName: hive.name, savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }), frames }]);
-    await speakHarvest(`Κυψέλη ${hiveNum}, ${frames} πλαίσια, αποθηκεύτηκε.`);
-  } catch (e: any) { setSessionError(`Σφάλμα: ${e.message}`); await speakHarvest('Σφάλμα αποθήκευσης.'); }
-  await speakHarvest('Αδράνεια. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
-} else {
-  await speakHarvest('Κυψέλη δεν καταγράφηκε. Αδράνεια. Πείτε έτοιμος για να ξαναπροσπαθήσετε.');
-}
-harvestPausedLoop(apiKey);
-return;
+          setVoiceState('processing');
+          try {
+            await createHarvest({ hive_id: hive.id, date: new Date().toISOString(), frames_harvested: frames });
+            try {
+              await updateHive(hive.id, { last_harvest_date: new Date().toISOString(), last_harvest_frames: frames });
+            } catch (e) { console.warn('[Harvest] updateHive failed, harvest saved OK', e); }
+            harvestSavedCount.current += 1;
+            setSavedCount(harvestSavedCount.current);
+            setSavedHives(sh => [...sh, { hiveName: hive.name, savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }), frames }]);
+            await speakHarvest(`Κυψέλη ${hiveNum}, ${frames} πλαίσια, αποθηκεύτηκε.`);
+          } catch (e: any) { setSessionError(`Σφάλμα: ${e.message}`); await speakHarvest('Σφάλμα αποθήκευσης.'); }
+          await speakHarvest('Πείτε επόμενη κυψέλη ή οριστικό τέλος.');
+        } else {
+          await speakHarvest('Κυψέλη δεν καταγράφηκε. Πείτε επόμενη κυψέλη ή οριστικό τέλος.');
+        }
+        setVoiceState('waiting_hive');
+        setCurrentHiveName('');
+        setCurrentQuestion('Πείτε αριθμό κυψέλης');
       }
     }
   };
@@ -352,17 +439,24 @@ return;
     }, 1000);
   };
 
-  // ═══ INSPECTION SESSION ═════════════════════════════════════
+  // ═══ INSPECTION SESSION (direct save) ═══════════════════════
   const guidedCallbacks: GuidedSessionCallbacks = {
     onQuestion:    (q) => setCurrentQuestion(q),
     onAnswer:      (a) => setLastAnswer(a),
     onListening:   () => {},
     onHiveStart:   (name) => { setCurrentHiveName(name); setCurrentQuestion(''); setLastAnswer(''); },
-    onError:       (msg) => setSessionError(msg),
+    onError:       (msg) => { console.warn('[Voice]', msg); setSessionError(msg); },
     onStateChange: (state) => {
       setVoiceState(state);
       if (state === 'waiting_hive') { setCurrentHiveName(''); setCurrentQuestion('Πείτε αριθμό κυψέλης'); setLastAnswer(''); }
-      if (state === 'paused') { setCurrentHiveName(''); setCurrentQuestion('Σε αδράνεια — πείτε "έτοιμος"'); }
+      if (state === 'paused') { setCurrentQuestion('Πείτε επόμενη κυψέλη ή οριστικό τέλος'); }
+    },
+    onHiveSaved: (name, count) => {
+      setSavedCount(count);
+      setSavedHives(sh => [...sh, {
+        hiveName: name,
+        savedAt: new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }),
+      }]);
     },
     onFinished: (count) => {
       setTimeout(() => {
@@ -371,26 +465,9 @@ return;
           count > 0 ? `${count} κυψέλες καταγράφηκαν.` : 'Δεν αποθηκεύτηκαν κυψέλες.',
           [{ text: 'Πίσω', onPress: () => navigation.goBack() }],
         );
-      }, 1000);
+      }, 800);
     },
-    onInspectionComplete: (result: GuidedInspectionResult) => {
-      guidedVoiceSession.reset();
-      setPreviewResult(result);
-      setPf(result.population_frames ?? 0);
-      setBf(result.brood_frames ?? 0);
-      setHf(result.honey_frames ?? 0);
-      setQp(result.queen_present ?? null);
-      setQs(result.queen_status ?? null);
-      setQc(result.queen_cells ?? 0);
-      setTp(result.temperament as any ?? null);
-      setSw(result.has_swarmed ?? false);
-      setFt(result.feeding_type as any ?? 'καμία');
-      setUrg(result.urgent ?? false);
-      setNotes(result.notes ?? '');
-      setSelectedHiveId(result.hive_id);
-      setSelectedHiveName(result.hive_name);
-      setEntryMode('preview');
-    },
+    saveInspection: persistVoiceInspection,
     getHiveByNumber,
   };
 
@@ -403,59 +480,13 @@ return;
     await guidedVoiceSession.start(guidedCallbacks);
   };
 
-  const savePreviewInspection = async () => {
-    if (!selectedHiveId) { Alert.alert('Προσοχή', 'Δεν βρέθηκε κυψέλη.'); return; }
-    setSaving(true);
-    const now = new Date().toISOString();
-    try {
-      await createInspection({
-        hive_id: selectedHiveId, date: now, mode: 'guided',
-        population_frames: pf || null, population_strength: ps as any,
-        temperament: tp as any, has_swarmed: sw, queen_present: qp,
-        queen_status: qs as any, queen_laying: ql as any, queen_cells: qc || null,
-        brood_frames: bf || null, brood_condition: bc as any, brood_type: bt as any,
-        honey_frames: hf || null, pollen_frames: plf || null,
-        feeding_type: ft as any, feeding_amount: ft !== 'καμία' ? fa : null,
-        varroa_level: vl as any, varroa_measurement: vm ? parseFloat(vm) : null,
-        diseases: dis.length ? dis.join(', ') : null,
-        treatment_type: tt || null, treatment_dose: td ? parseFloat(td) : null,
-        equipment_status: es as any, equipment_notes: en || null,
-        management_actions: ma || null, next_visit: nv || null,
-        next_visit_reason: nvr || null, urgent: urg, notes: notes || null,
-        audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
-      });
-      await updateHive(selectedHiveId, {
-        status: previewResult?.is_dead ? 'dead' : 'active',
-        last_inspection_date: now,
-        population_frames: pf || null,
-        brood_frames: bf || null,
-        honey_frames: hf || null,
-        queen_present: qp ?? null,
-        queen_status: qs ?? null,
-        temperament: tp ?? null,
-        has_swarmed: sw,
-        urgent: urg,
-        notes: notes || null,
-      });
-      if (previewResult?.is_dead) {
-        try { const fresh = await getHives(); setHives(fresh); hivesRef.current = fresh; } catch {}
-      }
-      Alert.alert('✅ Αποθηκεύτηκε!',
-        `Επιθεώρηση κυψέλης "${selectedHiveName}" καταχωρήθηκε.`,
-        [{ text: 'Πίσω', onPress: () => navigation.goBack() }]);
-    } catch (e: any) {
-      Alert.alert('Σφάλμα', e.message ?? 'Αποτυχία αποθήκευσης');
-    } finally {
-      setSaving(false);
-    }
-  };
-
+  // ═══ MANUAL SAVE (create ή update) ═════════════════════════
   const saveManualInspection = async () => {
     if (!selectedHiveId) { Alert.alert('Προσοχή', 'Επίλεξε κυψέλη.'); return; }
     setSaving(true);
     const now = new Date(date).toISOString();
     try {
-      await createInspection({
+      const payload = {
         hive_id: selectedHiveId, date: now, mode,
         population_frames: pf || null, population_strength: ps as any,
         temperament: tp as any, has_swarmed: sw, queen_present: qp,
@@ -469,8 +500,13 @@ return;
         equipment_status: es as any, equipment_notes: en || null,
         management_actions: ma || null, next_visit: nv || null,
         next_visit_reason: nvr || null, urgent: urg, notes: notes || null,
-        audio_url: null, transcript: null, notifications_disabled: false, user_id: '',
-      });
+        audio_url: null, transcript: null, notifications_disabled: false,
+      };
+      if (editingId) {
+        await updateInspection(editingId, payload);
+      } else {
+        await createInspection(payload);
+      }
       await updateHive(selectedHiveId, {
         last_inspection_date: now,
         population_frames: pf || null,
@@ -479,12 +515,14 @@ return;
         queen_present: qp ?? null,
         queen_status: qs ?? null,
         temperament: tp ?? null,
-        has_swarmed: sw,
-        urgent: urg,
+        has_swarmed: sw, urgent: urg,
         notes: notes || null,
       });
-      Alert.alert('✅ Αποθηκεύτηκε!', `Επιθεώρηση "${selectedHiveName}" καταχωρήθηκε.`,
-        [{ text: 'Πίσω', onPress: () => navigation.goBack() }]);
+      Alert.alert(
+        editingId ? '✅ Ενημερώθηκε!' : '✅ Αποθηκεύτηκε!',
+        `Επιθεώρηση "${selectedHiveName}" ${editingId ? 'ενημερώθηκε' : 'καταχωρήθηκε'}.`,
+        [{ text: 'Πίσω', onPress: () => navigation.goBack() }],
+      );
     } catch (e: any) {
       Alert.alert('Σφάλμα', e.message ?? 'Αποτυχία αποθήκευσης');
     } finally {
@@ -510,7 +548,7 @@ return;
     paused:       { icon: '⏸️', label: 'Αδράνεια — πείτε "έτοιμος"',  color: '#334155' },
     waiting_hive: { icon: '🎙️', label: 'Ακούω...',                    color: '#1E3A5F' },
     recording:    { icon: '🔴', label: 'Καταγραφή',                   color: '#7F1D1D' },
-    processing:   { icon: '⚙️', label: 'Επεξεργασία...',              color: '#1E293B' },
+    processing:   { icon: '⚙️', label: 'Αποθήκευση...',               color: '#1E293B' },
     finished:     { icon: '✅', label: 'Ολοκληρώθηκε',                 color: '#14532D' },
   };
   const cfg = stateLabel[voiceState] ?? stateLabel.idle;
@@ -521,27 +559,39 @@ return;
       <ScrollView style={s.selectContainer} contentContainerStyle={{ paddingBottom: 40 }}>
         <Text style={s.selectTitle}>🐝 Νέα Καταχώρηση</Text>
         <Text style={s.selectSub}>Επίλεξε τρόπο</Text>
+
         <TouchableOpacity style={s.selectBtnVoice} onPress={startVoiceSession} activeOpacity={0.85}>
           <Text style={s.selectBtnIcon}>🎙️</Text>
           <Text style={s.selectBtnTitle}>Φωνητική Επιθεώρηση</Text>
-          <Text style={s.selectBtnSub}>Ξεκινάει αμέσως — "στοπ" για παύση</Text>
+          <Text style={s.selectBtnSub}>Άμεση αποθήκευση μετά από κάθε κυψέλη</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.historyLink} onPress={() => navigation.navigate('InspectionHistory')} activeOpacity={0.7}>
+          <Text style={s.historyLinkIcon}>📋</Text>
+          <Text style={s.historyLinkTxt}>Ιστορικό Επιθεωρήσεων</Text>
+          <Text style={s.historyLinkArrow}>›</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={s.selectBtnHarvest} onPress={startHarvestSession} activeOpacity={0.85}>
           <Text style={s.selectBtnIcon}>🍯</Text>
           <Text style={s.selectBtnTitle}>Τρύγος</Text>
-          <Text style={s.selectBtnSub}>Ξεκινάει αμέσως — πλαίσια ανά κυψέλη</Text>
+          <Text style={s.selectBtnSub}>Πλαίσια ανά κυψέλη</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.historyLink} onPress={() => navigation.navigate('HarvestHistory')} activeOpacity={0.7}>
+          <Text style={s.historyLinkIcon}>🍯</Text>
+          <Text style={s.historyLinkTxt}>Ιστορικό Τρύγου</Text>
+          <Text style={s.historyLinkArrow}>›</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={s.selectBtnManual} onPress={() => setEntryMode('manual')} activeOpacity={0.85}>
           <Text style={s.selectBtnIcon}>✍️</Text>
           <Text style={[s.selectBtnTitle, { color: C.text }]}>Χειροκίνητη Καταχώρηση</Text>
           <Text style={[s.selectBtnSub, { color: C.textSub }]}>Συμπλήρωσε τα πεδία χειρόγραφα</Text>
         </TouchableOpacity>
+
         <View style={s.cmdGuide}>
           <Text style={s.cmdTitle}>📋 Φωνητικές Εντολές</Text>
           {[
             ['[αριθμός]', 'Επιλογή κυψέλης / πλαίσια'],
-            ['στοπ', 'Παύση — αδράνεια'],
-            ['έτοιμος', 'Συνέχεια από αδράνεια'],
             ['ναι / όχι', 'Απαντήσεις ερωτήσεων'],
             ['παράλειψη', 'Παράλειψη σημειώσεων'],
             ['τέλος', 'Τέλος σημειώσεων'],
@@ -631,81 +681,19 @@ return;
     );
   }
 
-  // ─── PREVIEW (μετά από φωνητική) ──────────────────────────
-  if (entryMode === 'preview') {
-    return (
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-          <View style={{ backgroundColor: C.primary, borderRadius: 16, padding: 16, marginBottom: 16, alignItems: 'center' }}>
-            <Text style={{ fontSize: 20, fontWeight: '800', color: '#fff' }}>🎙️ Έλεγχος Καταγραφής</Text>
-            <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 }}>
-              Κυψέλη {selectedHiveName} — Διόρθωσε αν χρειάζεται
-            </Text>
-          </View>
-          <View style={s.card}>
-            <SH e="👑" t="Πληθυσμός & Βασίλισσα" />
-            <Lbl text="Πλαίσια με Μέλισσες" /><Step val={pf} set={setPf} sfx="πλαίσια" />
-            <Lbl text="Ιδιοσυγκρασία" /><Chips opts={TEMPERAMENT_OPTIONS} val={tp} onSel={setTp} />
-            <Lbl text="Σμηνουργία" /><Tog val={sw} set={setSw} on="🐝 Σμηνουργήσε" off="Δεν σμηνούγησε" />
-            <Lbl text="Παρουσία Βασίλισσας" />
-            <View style={s.row}>
-              {[{ v: true, l: '✅ Ναι' }, { v: false, l: '❌ Όχι' }, { v: null, l: '❓ Αβέβαιο' }].map(o => (
-                <TouchableOpacity key={String(o.v)} style={[s.chip, qp === o.v && s.chipA]} onPress={() => setQp(o.v)} activeOpacity={0.7}>
-                  <Text style={[s.ct, qp === o.v && s.chipA]}>{o.l}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {qp !== null && (
-              <>
-                <Lbl text="Κατάσταση Βασίλισσας" />
-                <Chips opts={[
-                  { value: 'Εξαιρετική', label: '⭐ Εξαιρετική' },
-                  { value: 'Μέτρια',     label: '😐 Μέτρια'     },
-                  { value: 'κακή',       label: '❌ Κακή'       },
-                  { value: 'Δεν εντοπίστηκε', label: '🔍 Δεν εντοπίστηκε' },
-                  { value: 'Σμηνουργίας', label: '🐝 Σμηνουργίας' },
-                  { value: 'Ορφανό',      label: '⚠️ Ορφανό'      },
-                ]} val={qs} onSel={setQs} />
-              </>
-            )}
-            <Lbl text="Βασιλικά Κελιά" /><Step val={qc} set={setQc} max={20} sfx="κελιά" />
-          </View>
-          <View style={s.card}>
-            <SH e="🥚" t="Γόνος & Αποθέματα" />
-            <Lbl text="Πλαίσια Γόνου" /><Step val={bf} set={setBf} sfx="πλαίσια" />
-            <Lbl text="Πλαίσια Μελιού" /><Step val={hf} set={setHf} sfx="πλαίσια" />
-            <Lbl text="Τροφοδοσία" /><Chips opts={FEEDING_TYPE_OPTIONS} val={ft} onSel={setFt} />
-          </View>
-          <View style={s.card}>
-            <SH e="📝" t="Σημειώσεις & Προτεραιότητα" />
-            <Lbl text="Προτεραιότητα" /><Tog val={urg} set={setUrg} on="⚠️ Επείγον" off="✅ Κανονικό" />
-            <Lbl text="Σημειώσεις" />
-            <TextInput style={[s.inp, s.ta]} value={notes} onChangeText={setNotes}
-              multiline numberOfLines={4} placeholder="Ελεύθερες παρατηρήσεις..."
-              placeholderTextColor={C.textLight} />
-          </View>
-          <TouchableOpacity style={[s.saveBtn, saving && { opacity: 0.6 }]}
-            onPress={savePreviewInspection} disabled={saving} activeOpacity={0.85}>
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveTxt}>💾 Αποθήκευση Επιθεώρησης</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.saveBtn, { backgroundColor: C.textSub, marginTop: 8 }]}
-            onPress={() => setEntryMode('select')} activeOpacity={0.85}>
-            <Text style={s.saveTxt}>🗑️ Απόρριψη</Text>
-          </TouchableOpacity>
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
-    );
-  }
-
   // ─── MANUAL ───────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-        {!hive_id && (
+        {!hive_id && !editingId && (
           <TouchableOpacity style={s.backBtn} onPress={() => setEntryMode('select')}>
             <Text style={s.backBtnTxt}>← Αλλαγή τρόπου</Text>
           </TouchableOpacity>
+        )}
+        {editingId && (
+          <View style={s.editBanner}>
+            <Text style={s.editBannerTxt}>✏️ Επεξεργασία Επιθεώρησης</Text>
+          </View>
         )}
         <View style={s.card}>
           <SH e="🐝" t="Επίλεξε Κυψέλη" />
@@ -722,7 +710,7 @@ return;
             </View>
           </ScrollView>
         </View>
-        {recent.length > 0 && (
+        {recent.length > 0 && !editingId && (
           <View style={s.recentBox}>
             <Text style={s.recentTitle}>📅 Ιστορικό (τελευταίες 3)</Text>
             {recent.map(r => (
@@ -831,7 +819,7 @@ return;
           <TextInput style={[s.inp, s.ta]} value={notes} onChangeText={setNotes} multiline numberOfLines={4} placeholder="Ελεύθερες παρατηρήσεις..." placeholderTextColor={C.textLight} />
         </View>
         <TouchableOpacity style={[s.saveBtn, saving && { opacity: 0.6 }]} onPress={saveManualInspection} disabled={saving} activeOpacity={0.85}>
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveTxt}>💾 Αποθήκευση Επιθεώρησης</Text>}
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveTxt}>{editingId ? '💾 Ενημέρωση Επιθεώρησης' : '💾 Αποθήκευση Επιθεώρησης'}</Text>}
         </TouchableOpacity>
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -879,8 +867,10 @@ const s = StyleSheet.create({
   btnStop:        { backgroundColor: '#991B1B', borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
   btnBack:        { backgroundColor: C.green, borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
   btnTxt:         { fontSize: 16, fontWeight: '800', color: '#fff' },
-  backBtn:        { paddingHorizontal: 4 },
+  backBtn:        { paddingHorizontal: 4, paddingVertical: 8 },
   backBtnTxt:     { fontSize: 14, color: '#94A3B8' },
+  editBanner:     { backgroundColor: '#FEF3C7', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1.5, borderColor: C.primary },
+  editBannerTxt:  { fontSize: 15, fontWeight: '700', color: C.primaryDark, textAlign: 'center' },
   container:      { flex: 1, backgroundColor: C.bg },
   content:        { padding: 16 },
   recentBox:      { backgroundColor: C.blueLight, borderRadius: 12, padding: 12, marginBottom: 12 },
@@ -914,4 +904,14 @@ const s = StyleSheet.create({
   totOn:          { color: C.primaryDark, fontWeight: '700' },
   saveBtn:        { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 8, elevation: 6 },
   saveTxt:        { fontSize: 17, fontWeight: '800', color: '#FFFFFF' },
+  historyLink:    {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: C.card, borderRadius: 14,
+    paddingHorizontal: 18, paddingVertical: 14,
+    marginBottom: 16, borderWidth: 1.5, borderColor: C.border,
+    elevation: 1,
+  },
+  historyLinkIcon:  { fontSize: 22 },
+  historyLinkTxt:   { fontSize: 15, color: C.text, fontWeight: '700', flex: 1 },
+  historyLinkArrow: { fontSize: 22, color: C.textSub, fontWeight: '700' },
 });

@@ -108,3 +108,17 @@ export function scoreHiveForQueenRearing(inspection: Inspection): number {
   if (inspection.has_swarmed)                           score -= 10;
   return Math.max(0, Math.min(100, score));
 }
+
+export interface InspectionWithHive extends Inspection {
+  hive_name: string;
+}
+
+export async function getAllInspections(limit = 500): Promise<InspectionWithHive[]> {
+  const { data, error } = await supabase
+    .from('inspections')
+    .select(`*, hives ( name )`)
+    .order('date', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ ...r, hive_name: r.hives?.name ?? '—' }));
+}

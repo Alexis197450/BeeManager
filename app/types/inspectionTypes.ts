@@ -2,11 +2,11 @@
 
 export interface Inspection {
   id: string;
-  user_id: string;
+  user_id?: string;
   hive_id: string;
   date: string;
   notifications_disabled: boolean;
-  mode: 'guided' | 'quick' | 'audio';
+  mode: 'guided' | 'free' | 'manual' | 'quick' | 'audio';
 
   // Πληθυσμός & Βασίλισσα
   population_frames:    number | null;

@@ -1,6 +1,7 @@
-// guidedVoiceSession.ts — BeeManager v5.3
-// v5.3: saveInspection αφαιρέθηκε — αντικαταστάθηκε με onInspectionComplete
-// Τα δεδομένα πηγαίνουν πρώτα στο preview, ο χρήστης επιβεβαιώνει, μετά αποθηκεύονται
+// app/services/guidedVoiceSession.ts — BeeManager v6.2
+// = v5.3 με δύο αλλαγές μόνο:
+//   1. Direct save (saveInspection callback) αντί για preview
+//   2. Διορθωμένο pause flow ώστε multi-hive να ξανα-καλεί σωστά waitForHive
 
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
@@ -18,7 +19,7 @@ const GREEK_NUMBERS: Record<string, number> = {
   'οκτώ': 8, 'οκτω': 8, 'οχτώ': 8, 'οχτω': 8,
   'εννέα': 9, 'εννεα': 9, 'εννιά': 9, 'εννια': 9,
   'δέκα': 10, 'δεκα': 10,
-  'έντεκα': 11, 'εντεκa': 11,
+  'έντεκα': 11, 'εντεκα': 11,
   'δώδεκα': 12, 'δωδεκα': 12,
   'δεκατρία': 13, 'δεκατρια': 13,
   'δεκατέσσερα': 14, 'δεκατεσσερα': 14,
@@ -123,23 +124,23 @@ export interface GuidedInspectionResult {
 }
 
 export interface GuidedSessionCallbacks {
-  onQuestion:           (question: string) => void;
-  onAnswer:             (answer: string) => void;
-  onListening:          () => void;
-  onHiveStart:          (hiveName: string) => void;
-  onError:              (msg: string) => void;
-  onFinished:           (count: number) => void;
-  onStateChange:        (state: string) => void;
-  // v5.3: αντί για saveInspection, τώρα onInspectionComplete
-  // Η οθόνη παίρνει τα δεδομένα, τα βάζει στη φόρμα preview, ο χρήστης αποθηκεύει
-  onInspectionComplete: (result: GuidedInspectionResult) => void;
-  getHiveByNumber:      (num: number) => { id: string; name: string } | null;
+  onQuestion:      (question: string) => void;
+  onAnswer:        (answer: string) => void;
+  onListening:     () => void;
+  onHiveStart:     (hiveName: string) => void;
+  onHiveSaved:     (hiveName: string, count: number) => void;
+  onError:         (msg: string) => void;
+  onFinished:      (count: number) => void;
+  onStateChange:   (state: string) => void;
+  saveInspection:  (result: GuidedInspectionResult) => Promise<void>;
+  getHiveByNumber: (num: number) => { id: string; name: string } | null;
 }
 
 type NumResult   = { kind: 'ok'; value: number | null } | { kind: 'paused' } | { kind: 'ended' };
 type BoolResult  = { kind: 'ok'; value: boolean | null } | { kind: 'paused' } | { kind: 'ended' };
 type AskResult   = { kind: 'ok'; text: string } | { kind: 'failed' } | { kind: 'paused' } | { kind: 'ended' };
 type SessionOutcome = 'done' | 'ended';
+type Resume = 'continue' | 'end';
 
 // ─── CLASS ───────────────────────────────────────────────────────────────────
 
@@ -151,7 +152,6 @@ export class GuidedVoiceSession {
   private completedCount = 0;
   private activeRecording: Audio.Recording | null = null;
   private gen = 0;
-  private resumeCallback: (() => void) | null = null;
 
   private dead(g: number): boolean { return this.stop || g !== this.gen; }
 
@@ -196,7 +196,8 @@ export class GuidedVoiceSession {
       Speech.stop();
       Speech.speak(text, {
         language: 'el-GR', rate: 0.95,
-        onDone: () => done(), onError: () => done(),
+        onDone:    () => done(),
+        onError:   () => done(),
         onStopped: () => { setTimeout(resolve, 100); },
       });
     });
@@ -319,13 +320,17 @@ export class GuidedVoiceSession {
     return { kind: 'ok', value: null };
   }
 
-  private async doPause(g: number, msg: string): Promise<boolean> {
+  /** Καθαρή σειριακή paused loop. Παίρνει "έτοιμος" → 'continue', ή "οριστικό τέλος" → 'end'. */
+  private async waitForResume(g: number, msg: string): Promise<Resume> {
+    this.cb?.onStateChange('paused');
     await this.speak(g, msg);
-    await new Promise<void>(resolve => {
-      this.resumeCallback = () => resolve();
-      this.pausedLoop(g);
-    });
-    return this.dead(g);
+    while (!this.dead(g)) {
+      const text = await this.record(g, 2_500);
+      if (!text) continue;
+      if (isFinalEnd(text)) return 'end';
+      if (isWakeWord(text)) { this.cb?.onAnswer(text); return 'continue'; }
+    }
+    return 'end';
   }
 
   async start(cb: GuidedSessionCallbacks): Promise<void> {
@@ -336,35 +341,13 @@ export class GuidedVoiceSession {
     if (status !== 'granted') { cb.onError('Δεν δόθηκε άδεια μικροφώνου'); return; }
     this.running = true; this.stop = false;
     this.apiKey = key; this.cb = cb; this.completedCount = 0;
-    this.resumeCallback = null;
     const g = ++this.gen;
     await this.setRecording();
     this.waitForHive(g);
   }
 
-  private async pausedLoop(g: number): Promise<void> {
-    this.cb?.onStateChange('paused');
-    while (!this.dead(g)) {
-      const text = await this.record(g, 2_500);
-      if (!text) continue;
-      if (isFinalEnd(text)) { await this.finishSession(g); return; }
-      if (isWakeWord(text)) {
-        this.cb?.onAnswer(text);
-        if (this.resumeCallback) {
-          const resume = this.resumeCallback;
-          this.resumeCallback = null;
-          resume();
-        } else {
-          this.waitForHive(g);
-        }
-        return;
-      }
-    }
-  }
-
   private async waitForHive(g: number): Promise<void> {
     this.cb?.onStateChange('waiting_hive');
-    this.resumeCallback = null;
     await this.speak(g, 'Πείτε αριθμό κυψέλης.');
     let emptyCount = 0;
     while (!this.dead(g)) {
@@ -372,17 +355,22 @@ export class GuidedVoiceSession {
       if (!text) {
         emptyCount++;
         if (emptyCount >= 3) {
-          this.resumeCallback = () => this.waitForHive(g);
-          await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-          return;
+          const r = await this.waitForResume(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
+          if (r === 'end') { await this.finishSession(g); return; }
+          this.cb?.onStateChange('waiting_hive');
+          await this.speak(g, 'Πείτε αριθμό κυψέλης.');
+          emptyCount = 0;
+          continue;
         }
         continue;
       }
       emptyCount = 0;
       if (isStopWord(text)) {
-        this.resumeCallback = () => this.waitForHive(g);
-        await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-        return;
+        const r = await this.waitForResume(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
+        if (r === 'end') { await this.finishSession(g); return; }
+        this.cb?.onStateChange('waiting_hive');
+        await this.speak(g, 'Πείτε αριθμό κυψέλης.');
+        continue;
       }
       if (isFinalEnd(text)) { await this.finishSession(g); return; }
       this.cb?.onAnswer(text);
@@ -395,12 +383,13 @@ export class GuidedVoiceSession {
           const outcome = await this.runInspection(g, hive.id, hive.name, num);
           if (this.dead(g)) return;
           if (outcome === 'ended') { await this.finishSession(g); return; }
-          // v5.3: μετά από κάθε κυψέλη → αδράνεια
-          // Ο χρήστης βλέπει το preview και αποθηκεύει
-          // Μετά λέει "έτοιμος" για επόμενη
-          this.resumeCallback = () => this.waitForHive(g);
-          await this.doPause(g, 'Ελέγξτε την καταγραφή. Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
-          return;
+          // multi-hive: pause and continue
+          const r = await this.waitForResume(g,
+            'Πείτε έτοιμος για επόμενη κυψέλη ή οριστικό τέλος.');
+          if (r === 'end') { await this.finishSession(g); return; }
+          this.cb?.onStateChange('waiting_hive');
+          await this.speak(g, 'Πείτε αριθμό κυψέλης.');
+          continue;
         } else {
           await this.speak(g, `Δεν βρήκα κυψέλη ${num}. Ξαναπείτε.`);
         }
@@ -432,8 +421,10 @@ export class GuidedVoiceSession {
         const r = await this.askNumber(g, question, label);
         if (r.kind === 'ended') return 'ended';
         if (r.kind === 'ok')    return { value: r.value };
-        const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-        if (stopped) return 'ended';
+        // paused
+        const resume = await this.waitForResume(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
+        if (resume === 'end') return 'ended';
+        this.cb?.onStateChange('recording');
       }
       return 'ended';
     };
@@ -443,70 +434,68 @@ export class GuidedVoiceSession {
         const r = await this.askYesNo(g, question, label);
         if (r.kind === 'ended') return 'ended';
         if (r.kind === 'ok')    return { value: r.value };
-        const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
-        if (stopped) return 'ended';
+        const resume = await this.waitForResume(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια.');
+        if (resume === 'end') return 'ended';
+        this.cb?.onStateChange('recording');
       }
       return 'ended';
     };
 
-    // ── 1. Πληθυσμός ─────────────────────────────────────────
+    // 1. Πληθυσμός
     const pop = await getNum(`Κυψέλη ${hiveNum}. Πόσα πλαίσια πληθυσμός;`, 'Ο πληθυσμός');
-    if (pop === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (pop === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     if (pop.value === 0) {
       result.is_dead = true; result.population_frames = 0;
       result.urgent = true; result.notes = 'Νεκρό μελίσσι';
-      await this.speak(g, `Κυψέλη ${hiveNum} νεκρή. Ελέγξτε την καταγραφή.`);
-      this.sendToPreview(result);
+      await this.commitInspection(g, result, hiveNum);
       return 'done';
     }
     result.population_frames = pop.value;
 
-    // ── 2. Γόνος ─────────────────────────────────────────────
+    // 2. Γόνος
     const brood = await getNum('Πόσα πλαίσια γόνος;', 'Ο γόνος');
-    if (brood === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (brood === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     result.brood_frames = brood.value;
 
-    // ── 3. Μέλι ──────────────────────────────────────────────
+    // 3. Μέλι
     const honey = await getNum('Πόσα πλαίσια μέλι;', 'Το μέλι');
-    if (honey === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (honey === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     result.honey_frames = honey.value;
 
-    // ── 4. Βασίλισσα ─────────────────────────────────────────
+    // 4. Βασίλισσα
     const queenPresent = await getBool('Βασίλισσα παρούσα;', 'Η βασίλισσα');
-    if (queenPresent === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (queenPresent === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     result.queen_present = queenPresent.value;
     if (queenPresent.value === false) {
       const dayBrood = await getBool('Είδες γόνο ημέρας;', 'Ο γόνος ημέρας');
-      if (dayBrood === 'ended') { this.sendToPreview(result); return 'ended'; }
+      if (dayBrood === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
       if (dayBrood.value === true)  result.queen_status = 'Δεν εντοπίστηκε';
-      if (dayBrood.value === false) {
-        result.queen_status = 'Ορφανό'; result.urgent = true; result.notes = 'Ορφανό μελίσσι';
-      }
+      if (dayBrood.value === false) { result.queen_status = 'Ορφανό'; result.urgent = true; result.notes = 'Ορφανό μελίσσι'; }
     }
 
-    // ── 5. Βασιλικά κελιά ────────────────────────────────────
+    // 5. Βασιλικά κελιά
     const hasCells = await getBool('Βασιλικά κελιά;', 'Τα κελιά');
-    if (hasCells === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (hasCells === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     if (hasCells.value === true) {
       const cells = await getNum('Πόσα;', 'Τα κελιά');
-      if (cells === 'ended') { this.sendToPreview(result); return 'ended'; }
+      if (cells === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
       result.queen_cells = cells.value;
     } else {
       result.queen_cells = 0;
     }
 
-    // ── 6. Ιδιοσυγκρασία ─────────────────────────────────────
+    // 6. Ιδιοσυγκρασία
     const calm = await getBool('Ήρεμο μελίσσι;', 'Η ιδιοσυγκρασία');
-    if (calm === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (calm === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     if (calm.value === true)  result.temperament = 'ήρεμο';
     if (calm.value === false) result.temperament = 'επιθετικό';
 
-    // ── 7. Σμηνουργία ────────────────────────────────────────
+    // 7. Σμηνουργία
     const swarm = await getBool('Τάση σμηνουργίας;', 'Η σμηνουργία');
-    if (swarm === 'ended') { this.sendToPreview(result); return 'ended'; }
+    if (swarm === 'ended') { await this.commitInspection(g, result, hiveNum); return 'ended'; }
     result.has_swarmed = swarm.value === true;
 
-    // ── 8. Σημειώσεις ────────────────────────────────────────
+    // 8. Σημειώσεις
     this.cb?.onQuestion('Σημειώσεις;');
     await this.speak(g, 'Σημειώσεις; Παράλειψη ή μιλήστε και πείτε τέλος.');
     let notesText = '';
@@ -517,8 +506,9 @@ export class GuidedVoiceSession {
       if (!chunk) { notesEmpty++; if (notesEmpty >= 2) notesDone = true; continue; }
       if (isFinalEnd(chunk)) { notesDone = true; break; }
       if (isStopWord(chunk)) {
-        const stopped = await this.doPause(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια σημειώσεων.');
-        if (stopped) { notesDone = true; break; }
+        const r = await this.waitForResume(g, 'Αδράνεια. Πείτε έτοιμος για συνέχεια σημειώσεων.');
+        if (r === 'end') { notesDone = true; break; }
+        this.cb?.onStateChange('recording');
         await this.speak(g, 'Συνεχίστε σημειώσεις ή πείτε τέλος.');
         continue;
       }
@@ -537,23 +527,28 @@ export class GuidedVoiceSession {
       result.notes = (result.notes ? result.notes + '. ' : '') + notesText.trim();
     }
 
-    // v5.3: ΔΕΝ αποθηκεύουμε εδώ — στέλνουμε στο preview
-    await this.speak(g, `Κυψέλη ${hiveNum} καταγράφηκε. Ελέγξτε την οθόνη.`);
-    this.sendToPreview(result);
+    await this.commitInspection(g, result, hiveNum);
     return 'done';
   }
 
-  // v5.3: στέλνει το result στην οθόνη για preview — χωρίς Supabase
-  private sendToPreview(result: GuidedInspectionResult): void {
-    this.completedCount++;
-    this.cb?.onInspectionComplete(result);
+  /** Direct save + ηχητική επιβεβαίωση. Αντικαθιστά το παλιό sendToPreview. */
+  private async commitInspection(g: number, result: GuidedInspectionResult, hiveNum: number): Promise<void> {
+    this.cb?.onStateChange('processing');
+    try {
+      await this.cb!.saveInspection(result);
+      this.completedCount++;
+      this.cb?.onHiveSaved(result.hive_name, this.completedCount);
+      await this.speak(g, `Κυψέλη ${hiveNum} αποθηκεύτηκε.`);
+    } catch (e: any) {
+      this.cb?.onError(`Αποθήκευση κυψέλης ${hiveNum}: ${e?.message ?? e}`);
+      await this.speak(g, `Σφάλμα στην κυψέλη ${hiveNum}.`);
+    }
   }
 
   reset(): void {
     this.gen++;
     this.stop = true;
     this.running = false;
-    this.resumeCallback = null;
     Speech.stop();
     if (this.activeRecording) {
       this.activeRecording.stopAndUnloadAsync().catch(() => {});

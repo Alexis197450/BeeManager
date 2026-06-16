@@ -1,32 +1,42 @@
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║                     FinanceScreen.tsx                             ║
-// ║              Σύνοψη Οικονομικών - BeeManager                      ║
+// ║                     FinanceScreen.tsx                              ║
+// ║              Σύνοψη Οικονομικών - BeeManager v2.1                  ║
+// ║  FIX: breeding categories + safe info fallback                     ║
 // ╚════════════════════════════════════════════════════════════════════╝
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  ActivityIndicator,
-  Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  RefreshControl, ActivityIndicator, Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../contexts/AuthContext';
 import { dashboardService, productsService } from '../../services/financeService';
 
-// ─── CATEGORY INFO ────────────────────────────────────────────────────────
-const CATEGORY_INFO: Record<string, { label: string; emoji: string; color: string }> = {
+// ─── CATEGORY INFO (ΕΛΛΗΝΙΚΑ + slugs) ─────────────────────────────────────
+type CatInfo = { label: string; emoji: string; color: string };
+
+const CATEGORY_INFO: Record<string, CatInfo> = {
+  // Ελληνικά
   'Μέλι':             { label: 'Μέλι',             emoji: '🍯', color: '#F5A623' },
   'Πρόπολη':          { label: 'Πρόπολη',          emoji: '🟫', color: '#8B5E3C' },
   'Γύρη':             { label: 'Γύρη',             emoji: '🌼', color: '#F9D342' },
   'Βασιλικός Πολτός': { label: 'Βασιλικός Πολτός', emoji: '👑', color: '#A86EAF' },
   'Κερί':             { label: 'Κερί',             emoji: '🕯️', color: '#E8C84A' },
+  'Βασιλοτροφία':     { label: 'Βασιλοτροφία',     emoji: '🐝', color: '#27AE60' },
   'Άλλο':             { label: 'Άλλο',             emoji: '📦', color: '#7F8C8D' },
+
+  // Αγγλικά slugs (από breedingService / AddSaleScreen)
+  'honey':       { label: 'Μέλι',             emoji: '🍯', color: '#F5A623' },
+  'propolis':    { label: 'Πρόπολη',          emoji: '🟫', color: '#8B5E3C' },
+  'pollen':      { label: 'Γύρη',             emoji: '🌼', color: '#F9D342' },
+  'royal_jelly': { label: 'Βασιλικός Πολτός', emoji: '👑', color: '#A86EAF' },
+  'wax':         { label: 'Κερί',             emoji: '🕯️', color: '#E8C84A' },
+  'breeding':    { label: 'Βασιλοτροφία',     emoji: '🐝', color: '#27AE60' },
+  'other':       { label: 'Άλλο',             emoji: '📦', color: '#7F8C8D' },
 };
+
+const FALLBACK_INFO: CatInfo = { label: 'Άγνωστη', emoji: '📦', color: '#7F8C8D' };
 
 export default function FinanceScreen() {
   const navigation = useNavigation<any>();
@@ -39,16 +49,15 @@ export default function FinanceScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
-  // ─── LOAD DATA ──────────────────────────────────────────────────────────
   const loadData = useCallback(async (showRefresh = false) => {
     if (!user?.id) return;
     if (showRefresh) setIsRefreshing(true);
     else setIsLoading(true);
-
     try {
       const data = await dashboardService.getSummaryForYear(user.id, year);
       setSummary(data);
     } catch (error: any) {
+      console.warn('[Finance] Load error:', error?.message);
       Alert.alert('Σφάλμα', 'Αδυναμία φόρτωσης δεδομένων.');
     } finally {
       setIsLoading(false);
@@ -58,11 +67,10 @@ export default function FinanceScreen() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // ─── GROUP PRODUCTS BY CATEGORY ─────────────────────────────────────────
   const groupedProducts = React.useMemo(() => {
-    if (!summary?.products) return {};
+    if (!summary?.products || !Array.isArray(summary.products)) return {};
     return summary.products.reduce((acc: any, p: any) => {
-      const cat = p.category || 'other';
+      const cat = (p?.category ?? '').toString().trim() || 'other';
       if (!acc[cat]) acc[cat] = [];
       acc[cat].push(p);
       return acc;
@@ -70,9 +78,8 @@ export default function FinanceScreen() {
   }, [summary]);
 
   const fmt = (n: number) =>
-    n.toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    (n ?? 0).toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // ─── LOADING ────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <View style={styles.centered}>
@@ -94,7 +101,6 @@ export default function FinanceScreen() {
         <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} tintColor="#F5A623" />
       }
     >
-      {/* ── YEAR SELECTOR ── */}
       <View style={styles.yearBar}>
         <TouchableOpacity onPress={() => setYear(y => y - 1)} style={styles.chevron}>
           <Text style={styles.chevronText}>‹</Text>
@@ -109,19 +115,19 @@ export default function FinanceScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ── SUMMARY CARDS ── */}
       <View style={styles.cardsRow}>
-  <View style={[styles.card, styles.cardBlue]}>
-    <Text style={styles.cardEmoji}>💶</Text>
-    <Text style={styles.cardLabel}>Πωλήσεις</Text>
-    <Text style={styles.cardValue}>€{fmt(totals.revenue || 0)}</Text>
-  </View>
-  <View style={[styles.card, styles.cardRed]}>
-    <Text style={styles.cardEmoji}>💸</Text>
-    <Text style={styles.cardLabel}>Έξοδα</Text>
-    <Text style={styles.cardValue}>€{fmt(expenseTotal)}</Text>
-  </View>
-</View>
+        <View style={[styles.card, styles.cardBlue]}>
+          <Text style={styles.cardEmoji}>💶</Text>
+          <Text style={styles.cardLabel}>Πωλήσεις</Text>
+          <Text style={styles.cardValue}>€{fmt(totals.revenue || 0)}</Text>
+        </View>
+        <View style={[styles.card, styles.cardRed]}>
+          <Text style={styles.cardEmoji}>💸</Text>
+          <Text style={styles.cardLabel}>Έξοδα</Text>
+          <Text style={styles.cardValue}>€{fmt(expenseTotal)}</Text>
+        </View>
+      </View>
+
       <View style={[styles.profitCard, isProfit ? styles.profitGreen : styles.profitRed]}>
         <Text style={styles.profitLabel}>{isProfit ? '📈 Καθαρό Κέρδος' : '📉 Ζημία'}</Text>
         <Text style={styles.profitValue}>€{fmt(Math.abs(profit))}</Text>
@@ -132,7 +138,6 @@ export default function FinanceScreen() {
         )}
       </View>
 
-      {/* ── ΚΑΤΗΓΟΡΙΕΣ ── */}
       <Text style={styles.sectionTitle}>Ανά Κατηγορία Προϊόντος</Text>
 
       {Object.keys(groupedProducts).length === 0 ? (
@@ -146,22 +151,23 @@ export default function FinanceScreen() {
             <Text style={styles.addBtnText}>+ Νέο Προϊόν</Text>
           </TouchableOpacity>
         </View>
-        
       ) : (
         Object.entries(groupedProducts).map(([cat, products]: any) => {
-          const info = CATEGORY_INFO[cat] || CATEGORY_INFO.other;
-          const catRevenue = products.reduce(
-            (s: number, p: any) => s + (p.breakdown?.summary?.totalRevenue || 0), 0
+          // SAFE LOOKUP με τριπλό fallback
+          const info: CatInfo = CATEGORY_INFO[cat] ?? CATEGORY_INFO['Άλλο'] ?? FALLBACK_INFO;
+
+          const list = Array.isArray(products) ? products : [];
+          const catRevenue = list.reduce(
+            (s: number, p: any) => s + (p?.breakdown?.summary?.totalRevenue || 0), 0
           );
-          const catCost = products.reduce(
-            (s: number, p: any) => s + (p.breakdown?.summary?.totalCost || 0), 0
+          const catCost = list.reduce(
+            (s: number, p: any) => s + (p?.breakdown?.summary?.totalCost || 0), 0
           );
           const catProfit = catRevenue - catCost;
           const isExpanded = expandedCategory === cat;
 
           return (
             <View key={cat} style={styles.categoryCard}>
-              {/* Header */}
               <TouchableOpacity
                 style={styles.categoryHeader}
                 onPress={() => setExpandedCategory(isExpanded ? null : cat)}
@@ -171,7 +177,7 @@ export default function FinanceScreen() {
                   <Text style={styles.categoryEmoji}>{info.emoji}</Text>
                   <Text style={styles.categoryLabel}>{info.label}</Text>
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{products.length}</Text>
+                    <Text style={styles.badgeText}>{list.length}</Text>
                   </View>
                 </View>
                 <View style={styles.categoryRight}>
@@ -182,15 +188,16 @@ export default function FinanceScreen() {
                 </View>
               </TouchableOpacity>
 
-              {/* Expanded Products */}
               {isExpanded && (
                 <View style={styles.productList}>
-                  {products.map((p: any) => {
-                    const bd = p.breakdown?.summary || {};
+                  {list.map((p: any) => {
+                    const bd = p?.breakdown?.summary || {};
+                    const rev = bd.totalRevenue || 0;
+                    const cost = bd.totalCost || 0;
                     return (
                       <View key={p.id} style={styles.productRow}>
                         <View style={styles.productRowTop}>
-                          <Text style={styles.productName}>{p.name}</Text>
+                          <Text style={styles.productName}>{p?.name ?? '—'}</Text>
                           <View style={styles.productRowActions}>
                             <TouchableOpacity
                               style={styles.productActionBtn}
@@ -203,7 +210,7 @@ export default function FinanceScreen() {
                               onPress={() =>
                                 Alert.alert(
                                   '🗑️ Διαγραφή',
-                                  `Να διαγραφεί το "${p.name}";`,
+                                  `Να διαγραφεί το "${p?.name}";`,
                                   [
                                     { text: 'Ακύρωση', style: 'cancel' },
                                     {
@@ -227,13 +234,13 @@ export default function FinanceScreen() {
                           </View>
                         </View>
                         <View style={styles.productStats}>
-                          <Text style={styles.productStat}>💶 {fmt(bd.totalRevenue || 0)}</Text>
-                          <Text style={styles.productStat}>💸 {fmt(bd.totalCost || 0)}</Text>
+                          <Text style={styles.productStat}>💶 {fmt(rev)}</Text>
+                          <Text style={styles.productStat}>💸 {fmt(cost)}</Text>
                           <Text style={[
                             styles.productStat,
-                            (bd.totalRevenue - bd.totalCost) >= 0 ? styles.green : styles.red,
+                            (rev - cost) >= 0 ? styles.green : styles.red,
                           ]}>
-                            📊 {fmt((bd.totalRevenue || 0) - (bd.totalCost || 0))}
+                            📊 {fmt(rev - cost)}
                           </Text>
                         </View>
                       </View>
@@ -246,7 +253,6 @@ export default function FinanceScreen() {
         })
       )}
 
-      {/* ── ACTION BUTTONS ── */}
       <View style={styles.actionsSection}>
         <Text style={styles.sectionTitle}>Ενέργειες</Text>
         <View style={styles.actionsGrid}>
@@ -279,12 +285,12 @@ export default function FinanceScreen() {
             <Text style={styles.actionLabel}>Νέα Πώληση</Text>
           </TouchableOpacity>
           <TouchableOpacity
-    style={[styles.actionBtn, { backgroundColor: '#8E44AD' }]}
-    onPress={() => navigation.navigate('AddAsset')}
-  >
-    <Text style={styles.actionEmoji}>🏭</Text>
-    <Text style={styles.actionLabel}>Πάγια</Text>
-  </TouchableOpacity>
+            style={[styles.actionBtn, { backgroundColor: '#8E44AD' }]}
+            onPress={() => navigation.navigate('AddAsset')}
+          >
+            <Text style={styles.actionEmoji}>🏭</Text>
+            <Text style={styles.actionLabel}>Πάγια</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -293,13 +299,10 @@ export default function FinanceScreen() {
   );
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E7' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8E7' },
   loadingText: { marginTop: 12, color: '#888', fontSize: 14 },
-
-  // Year Bar
   yearBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     paddingVertical: 14, backgroundColor: '#fff',
@@ -308,8 +311,6 @@ const styles = StyleSheet.create({
   chevron: { paddingHorizontal: 20 },
   chevronText: { fontSize: 28, color: '#F5A623', fontWeight: '700' },
   yearText: { fontSize: 18, fontWeight: '700', color: '#2C3E50', minWidth: 100, textAlign: 'center' },
-
-  // Summary Cards
   cardsRow: { flexDirection: 'row', padding: 12, gap: 10 },
   card: {
     flex: 1, borderRadius: 12, padding: 16, alignItems: 'center',
@@ -320,8 +321,6 @@ const styles = StyleSheet.create({
   cardEmoji: { fontSize: 22 },
   cardLabel: { fontSize: 12, color: '#666', marginTop: 4 },
   cardValue: { fontSize: 18, fontWeight: '700', color: '#2C3E50', marginTop: 2 },
-
-  // Profit Card
   profitCard: {
     marginHorizontal: 12, marginBottom: 12, borderRadius: 14, padding: 18,
     alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 4,
@@ -331,14 +330,10 @@ const styles = StyleSheet.create({
   profitLabel: { fontSize: 14, color: '#555', fontWeight: '600' },
   profitValue: { fontSize: 28, fontWeight: '800', color: '#2C3E50', marginTop: 4 },
   profitMargin: { fontSize: 12, color: '#888', marginTop: 4 },
-
-  // Section Title
   sectionTitle: {
     fontSize: 15, fontWeight: '700', color: '#2C3E50',
     marginHorizontal: 12, marginTop: 16, marginBottom: 8,
   },
-
-  // Empty State
   emptyBox: {
     margin: 12, padding: 32, backgroundColor: '#fff', borderRadius: 14,
     alignItems: 'center', borderWidth: 1, borderColor: '#F0E0B0', borderStyle: 'dashed',
@@ -349,8 +344,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5A623', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20,
   },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-
-  // Category Cards
   categoryCard: {
     marginHorizontal: 12, marginBottom: 10, backgroundColor: '#fff',
     borderRadius: 12, overflow: 'hidden',
@@ -370,8 +363,6 @@ const styles = StyleSheet.create({
   categoryRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   categoryProfit: { fontSize: 15, fontWeight: '700' },
   expandIcon: { fontSize: 12, color: '#999' },
-
-  // Product List
   productList: { borderTopWidth: 1, borderTopColor: '#F5F0E8', paddingBottom: 8 },
   productRow: {
     paddingHorizontal: 14, paddingVertical: 10,
@@ -385,12 +376,8 @@ const styles = StyleSheet.create({
   productName: { fontSize: 14, fontWeight: '600', color: '#2C3E50', flex: 1 },
   productStats: { flexDirection: 'row', gap: 12 },
   productStat: { fontSize: 12, color: '#666' },
-
-  // Colors
   green: { color: '#27AE60' },
   red: { color: '#E74C3C' },
-
-  // Actions
   actionsSection: { marginTop: 8 },
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', padding: 12, gap: 10 },
   actionBtn: {

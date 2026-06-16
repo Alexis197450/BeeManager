@@ -18,7 +18,6 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { expensesService, productsService } from '../../services/financeService';
 import {
@@ -377,7 +376,8 @@ export default function AddExpenseScreen() {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <>
-                    <MaterialCommunityIcons name="check" size={18} color="#fff" />
+                     <Text style={{ color: '#fff', fontSize: 16 }}>✓</Text>
+
                     <Text style={styles.saveBtnText}>{editingId ? 'Αποθήκευση' : 'Καταχώρηση'}</Text>
                   </>
                 )}
@@ -386,7 +386,7 @@ export default function AddExpenseScreen() {
           </View>
         ) : (
           <TouchableOpacity style={styles.addBtn} onPress={() => { setForm(emptyForm()); setShowForm(true); }}>
-            <MaterialCommunityIcons name="plus-circle-outline" size={22} color="#fff" />
+             <Text style={{ color: '#fff', fontSize: 20 }}>＋</Text>
             <Text style={styles.addBtnText}>Νέο Έξοδο</Text>
           </TouchableOpacity>
         )}
@@ -457,13 +457,13 @@ export default function AddExpenseScreen() {
                       style={styles.expenseActionBtn}
                       onPress={() => handleEdit(expense)}
                     >
-                      <MaterialCommunityIcons name="pencil-outline" size={18} color="#F5A623" />
+                      <Text style={{ fontSize: 16 }}>✏️</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.expenseActionBtn}
                       onPress={() => handleDelete(expense)}
                     >
-                      <MaterialCommunityIcons name="delete-outline" size={18} color="#E74C3C" />
+                      <Text style={{ fontSize: 16 }}>🗑️</Text>
                     </TouchableOpacity>
                   </View>
                 </View>

@@ -291,6 +291,13 @@ export default function FinanceScreen() {
             <Text style={styles.actionEmoji}>🏭</Text>
             <Text style={styles.actionLabel}>Πάγια</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: '#16A085' }]}
+            onPress={() => navigation.navigate('ProductionCost', { year })}
+          >
+            <Text style={styles.actionEmoji}>📊</Text>
+            <Text style={styles.actionLabel}>Κόστος Παραγωγής</Text>
+          </TouchableOpacity>
         </View>
       </View>
 

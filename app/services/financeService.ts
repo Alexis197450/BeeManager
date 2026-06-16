@@ -297,6 +297,7 @@ export const expensesService = {
       labor: 0,
       packaging: 0,
       chemicals: 0,
+      clothing: 0,
       maintenance: 0,
       other: 0,
       total: 0,

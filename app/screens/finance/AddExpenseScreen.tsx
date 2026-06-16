@@ -1,6 +1,7 @@
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║                     AddExpenseScreen.tsx                          ║
+// ║                     AddExpenseScreen.tsx — v2.1                    ║
 // ║              Διαχείριση Εξόδων - BeeManager                       ║
+// ║   FIX: Safe access για άγνωστους expense types                    ║
 // ╚════════════════════════════════════════════════════════════════════╝
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -28,18 +29,28 @@ import {
   type Product,
 } from '../../types/beemanager_finance_types';
 
+// ─── SAFE FALLBACK για άγνωστους types ───────────────────────────────
+const FALLBACK_INFO = { label: 'Άγνωστο', emoji: '❓' };
+
+const getTypeInfo = (type: string | undefined | null) => {
+  if (!type) return FALLBACK_INFO;
+  return EXPENSE_TYPE_INFO[type as ExpenseType] ?? FALLBACK_INFO;
+};
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────
 const EXPENSE_TYPES = Object.keys(EXPENSE_TYPE_INFO) as ExpenseType[];
 
 const todayISO = () => new Date().toISOString().split('T')[0];
 
-const fmtDate = (iso: string) => {
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y}`;
+const fmtDate = (iso: string | undefined | null) => {
+  if (!iso) return '—';
+  const parts = iso.split('-');
+  if (parts.length < 3) return iso;
+  return `${parts[2].slice(0, 2)}/${parts[1]}/${parts[0]}`;
 };
 
-const fmtAmount = (n: number) =>
-  n.toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtAmount = (n: number | undefined | null) =>
+  (n ?? 0).toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ─── FORM STATE ───────────────────────────────────────────────────────────
 interface FormState {
@@ -61,10 +72,10 @@ const emptyForm = (): FormState => ({
 });
 
 const expenseToForm = (e: ExpenseProduction): FormState => ({
-  type: e.type,
+  type: (EXPENSE_TYPE_INFO[e.type] ? e.type : 'other') as ExpenseType,
   allocation_type: e.allocation_type,
   product_id: e.product_id || '',
-  amount: String(e.amount),
+  amount: String(e.amount ?? ''),
   date: e.date,
   notes: e.notes || '',
 });
@@ -102,9 +113,10 @@ export default function AddExpenseScreen() {
         expensesService.getByYear(user.id, year),
         productsService.getAll(user.id),
       ]);
-      setExpenses(exp);
-      setProducts(prod);
-    } catch {
+      setExpenses(exp ?? []);
+      setProducts(prod ?? []);
+    } catch (err: any) {
+      console.warn('[AddExpense] Load error:', err?.message);
       Alert.alert('Σφάλμα', 'Αδυναμία φόρτωσης δεδομένων.');
     } finally {
       setIsLoading(false);
@@ -142,7 +154,6 @@ export default function AddExpenseScreen() {
       };
 
       if (editingId) {
-        // Update: delete + re-create (no update method needed)
         await expensesService.delete(editingId);
         await expensesService.create(user.id, input);
       } else {
@@ -163,7 +174,7 @@ export default function AddExpenseScreen() {
 
   // ─── DELETE ──────────────────────────────────────────────────────────
   const handleDelete = (expense: ExpenseProduction) => {
-    const info = EXPENSE_TYPE_INFO[expense.type];
+    const info = getTypeInfo(expense.type);
     Alert.alert(
       '🗑️ Διαγραφή',
       `Να διαγραφεί το έξοδο "${info.emoji} ${info.label}" €${fmtAmount(expense.amount)} (${fmtDate(expense.date)});`,
@@ -205,7 +216,7 @@ export default function AddExpenseScreen() {
     ? expenses
     : expenses.filter((e) => e.type === filterType);
 
-  const total = filtered.reduce((s, e) => s + e.amount, 0);
+  const total = filtered.reduce((s, e) => s + (e.amount ?? 0), 0);
 
   // ─── LOADING ─────────────────────────────────────────────────────────
   if (isLoading) {
@@ -242,11 +253,10 @@ export default function AddExpenseScreen() {
               {editingId ? '✏️ Επεξεργασία Εξόδου' : '➕ Νέο Έξοδο'}
             </Text>
 
-            {/* Τύπος εξόδου */}
             <Text style={styles.label}>Τύπος Εξόδου *</Text>
             <View style={styles.typeGrid}>
               {EXPENSE_TYPES.map((t) => {
-                const info = EXPENSE_TYPE_INFO[t];
+                const info = getTypeInfo(t);
                 const active = form.type === t;
                 return (
                   <TouchableOpacity
@@ -263,7 +273,6 @@ export default function AddExpenseScreen() {
               })}
             </View>
 
-            {/* Κατανομή */}
             <Text style={styles.label}>Κατανομή *</Text>
             <View style={styles.allocRow}>
               <TouchableOpacity
@@ -289,7 +298,6 @@ export default function AddExpenseScreen() {
                 : 'Το κόστος αποδίδεται απευθείας σε ένα προϊόν'}
             </Text>
 
-            {/* Επιλογή προϊόντος αν direct */}
             {form.allocation_type === 'direct_to_product' && (
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Προϊόν *</Text>
@@ -307,7 +315,7 @@ export default function AddExpenseScreen() {
                             onPress={() => setForm((f) => ({ ...f, product_id: p.id }))}
                           >
                             <Text style={[styles.productChipText, active && styles.productChipTextActive]}>
-                              {p.name}
+                              {p.name ?? '—'}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -319,7 +327,6 @@ export default function AddExpenseScreen() {
               </View>
             )}
 
-            {/* Ποσό */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Ποσό (€) *</Text>
               <TextInput
@@ -333,7 +340,6 @@ export default function AddExpenseScreen() {
               {errors.amount && <Text style={styles.errorText}>{errors.amount}</Text>}
             </View>
 
-            {/* Ημερομηνία */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Ημερομηνία * (ΕΕΕΕ-ΜΜ-ΗΗ)</Text>
               <TextInput
@@ -348,7 +354,6 @@ export default function AddExpenseScreen() {
               {errors.date && <Text style={styles.errorText}>{errors.date}</Text>}
             </View>
 
-            {/* Σημειώσεις */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Σημειώσεις (προαιρετικό)</Text>
               <TextInput
@@ -362,7 +367,6 @@ export default function AddExpenseScreen() {
               />
             </View>
 
-            {/* Actions */}
             <View style={styles.formActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={handleCancelForm} disabled={isSaving}>
                 <Text style={styles.cancelBtnText}>Ακύρωση</Text>
@@ -375,19 +379,16 @@ export default function AddExpenseScreen() {
                 {isSaving ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <>
-                     <Text style={{ color: '#fff', fontSize: 16 }}>✓</Text>
-
-                    <Text style={styles.saveBtnText}>{editingId ? 'Αποθήκευση' : 'Καταχώρηση'}</Text>
-                  </>
+                  <Text style={styles.saveBtnText}>
+                    {editingId ? '✓ Αποθήκευση' : '✓ Καταχώρηση'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
           </View>
         ) : (
           <TouchableOpacity style={styles.addBtn} onPress={() => { setForm(emptyForm()); setShowForm(true); }}>
-             <Text style={{ color: '#fff', fontSize: 20 }}>＋</Text>
-            <Text style={styles.addBtnText}>Νέο Έξοδο</Text>
+            <Text style={styles.addBtnText}>＋ Νέο Έξοδο</Text>
           </TouchableOpacity>
         )}
 
@@ -403,7 +404,7 @@ export default function AddExpenseScreen() {
               </Text>
             </TouchableOpacity>
             {EXPENSE_TYPES.filter((t) => expenses.some((e) => e.type === t)).map((t) => {
-              const info = EXPENSE_TYPE_INFO[t];
+              const info = getTypeInfo(t);
               const count = expenses.filter((e) => e.type === t).length;
               const active = filterType === t;
               return (
@@ -429,7 +430,7 @@ export default function AddExpenseScreen() {
           </View>
         ) : (
           filtered.map((expense) => {
-            const info = EXPENSE_TYPE_INFO[expense.type];
+            const info = getTypeInfo(expense.type);
             const product = products.find((p) => p.id === expense.product_id);
             return (
               <View key={expense.id} style={styles.expenseCard}>
@@ -453,16 +454,10 @@ export default function AddExpenseScreen() {
                 <View style={styles.expenseRight}>
                   <Text style={styles.expenseAmount}>€{fmtAmount(expense.amount)}</Text>
                   <View style={styles.expenseActions}>
-                    <TouchableOpacity
-                      style={styles.expenseActionBtn}
-                      onPress={() => handleEdit(expense)}
-                    >
+                    <TouchableOpacity style={styles.expenseActionBtn} onPress={() => handleEdit(expense)}>
                       <Text style={{ fontSize: 16 }}>✏️</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.expenseActionBtn}
-                      onPress={() => handleDelete(expense)}
-                    >
+                    <TouchableOpacity style={styles.expenseActionBtn} onPress={() => handleDelete(expense)}>
                       <Text style={{ fontSize: 16 }}>🗑️</Text>
                     </TouchableOpacity>
                   </View>
@@ -478,26 +473,18 @@ export default function AddExpenseScreen() {
   );
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8E7' },
   scrollContent: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 40 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF8E7' },
   loadingText: { marginTop: 12, color: '#888', fontSize: 14 },
-
   yearHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12,
-    elevation: 2,
+    backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12, elevation: 2,
   },
   yearText: { fontSize: 16, fontWeight: '700', color: '#2C3E50' },
   yearTotal: { fontSize: 15, fontWeight: '700', color: '#E74C3C' },
-
-  // Form
-  formCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 18,
-    marginBottom: 12, elevation: 2,
-  },
+  formCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, marginBottom: 12, elevation: 2 },
   formTitle: { fontSize: 17, fontWeight: '700', color: '#2C3E50', marginBottom: 16 },
   formGroup: { marginBottom: 16 },
   label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 6 },
@@ -510,8 +497,6 @@ const styles = StyleSheet.create({
   inputError: { borderColor: '#E74C3C', backgroundColor: '#FFF0EE' },
   errorText: { fontSize: 12, color: '#E74C3C', marginTop: 4 },
   notesInput: { height: 80, textAlignVertical: 'top', paddingTop: 10 },
-
-  // Type grid
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   typeBtn: {
     width: '30%', borderWidth: 1.5, borderColor: '#ddd', borderRadius: 10,
@@ -521,8 +506,6 @@ const styles = StyleSheet.create({
   typeEmoji: { fontSize: 22, marginBottom: 4 },
   typeLabel: { fontSize: 11, color: '#666', fontWeight: '500' },
   typeLabelActive: { color: '#C47A00', fontWeight: '700' },
-
-  // Allocation
   allocRow: { flexDirection: 'row', gap: 10, marginBottom: 4 },
   allocBtn: {
     flex: 1, borderWidth: 1.5, borderColor: '#ddd', borderRadius: 10,
@@ -531,8 +514,6 @@ const styles = StyleSheet.create({
   allocBtnActive: { borderColor: '#F5A623', backgroundColor: '#FFF8E7' },
   allocText: { fontSize: 13, color: '#666', fontWeight: '600' },
   allocTextActive: { color: '#C47A00' },
-
-  // Product chips
   productChips: { flexDirection: 'row', gap: 8, paddingVertical: 4 },
   productChip: {
     borderWidth: 1, borderColor: '#ddd', borderRadius: 20,
@@ -541,8 +522,6 @@ const styles = StyleSheet.create({
   productChipActive: { borderColor: '#F5A623', backgroundColor: '#FFF8E7' },
   productChipText: { fontSize: 13, color: '#555' },
   productChipTextActive: { color: '#C47A00', fontWeight: '700' },
-
-  // Form actions
   formActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
   cancelBtn: {
     flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
@@ -550,21 +529,17 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: { color: '#666', fontWeight: '600' },
   saveBtn: {
-    flex: 1.5, flexDirection: 'row', backgroundColor: '#F5A623', borderRadius: 8,
-    paddingVertical: 12, alignItems: 'center', justifyContent: 'center', gap: 6,
+    flex: 1.5, backgroundColor: '#F5A623', borderRadius: 8,
+    paddingVertical: 12, alignItems: 'center', justifyContent: 'center',
   },
   saveBtnDisabled: { opacity: 0.6 },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-
-  // Add button
   addBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, backgroundColor: '#F5A623', borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F5A623', borderRadius: 12,
     paddingVertical: 14, marginBottom: 12, elevation: 2,
   },
-  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-
-  // Filter
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   filterScroll: { marginBottom: 10 },
   filterRow: { flexDirection: 'row', gap: 8, paddingVertical: 4 },
   filterChip: {
@@ -574,16 +549,12 @@ const styles = StyleSheet.create({
   filterChipActive: { borderColor: '#F5A623', backgroundColor: '#FFF8E7' },
   filterChipText: { fontSize: 12, color: '#555' },
   filterChipTextActive: { color: '#C47A00', fontWeight: '700' },
-
-  // Empty
   emptyBox: {
     alignItems: 'center', paddingVertical: 40, backgroundColor: '#fff',
     borderRadius: 12, marginTop: 8,
   },
   emptyEmoji: { fontSize: 40, marginBottom: 8 },
   emptyText: { color: '#888', fontSize: 14 },
-
-  // Expense Card
   expenseCard: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: '#fff', borderRadius: 12, padding: 12,

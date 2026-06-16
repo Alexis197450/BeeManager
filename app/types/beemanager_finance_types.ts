@@ -89,13 +89,8 @@ export interface CreatePackagingPresetInput {
 // 3. EXPENSES (Έξοδα Παραγωγής)
 // ─────────────────────────────────────────────────────────────────────
 export type ExpenseType = 
-  | 'fuel' 
-  | 'feed' 
-  | 'labor' 
-  | 'packaging' 
-  | 'chemicals' 
-  | 'maintenance' 
-  | 'other';
+  | 'fuel' | 'feed' | 'labor' | 'packaging' 
+  | 'chemicals' | 'maintenance' | 'clothing' | 'other';
 
 export const EXPENSE_TYPE_INFO: Record<ExpenseType, { label: string; emoji: string }> = {
   fuel:        { label: 'Καύσιμα',      emoji: '⛽' },
@@ -104,6 +99,7 @@ export const EXPENSE_TYPE_INFO: Record<ExpenseType, { label: string; emoji: stri
   packaging:   { label: 'Συσκευασία',   emoji: '📦' },
   chemicals:   { label: 'Χημικά',       emoji: '🧪' },
   maintenance: { label: 'Συντήρηση',    emoji: '🔧' },
+  clothing: { label: 'Ρουχισμός', emoji: '🥽' },
   other:       { label: 'Άλλο',         emoji: '➕' },
 };
 
@@ -411,6 +407,7 @@ export interface ExpenseSummaryByCategory {
   packaging: number;
   chemicals: number;
   maintenance: number;
+  clothing: number;
   other: number;
   
   total: number;

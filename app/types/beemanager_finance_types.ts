@@ -185,11 +185,9 @@ export interface ProductionLog {
   user_id: string;
   product_id: string;
   
-  year: number;
-  quantity_produced: number;
+  quantity: number;
   unit: UnitType;
-  
-  date: string;
+  production_date: string;
   notes?: string;
   
   created_at: string;

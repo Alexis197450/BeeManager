@@ -484,7 +484,7 @@ export const productionService = {
 
   async getTotalByProduct(productId: string, year: number): Promise<number> {
     const logs = await this.getByProduct(productId, year);
-    return logs.reduce((sum, log) => sum + (log.quantity_produced || 0), 0);
+    return logs.reduce((sum, log) => sum + (log.quantity || 0), 0);
   },
 
   async create(userId: string, input: any) {
@@ -689,7 +689,7 @@ export const costingService = {
       const prodByProduct: Record<string, number> = {};
       allProduction.forEach(p => {
         prodByProduct[p.product_id] =
-          (prodByProduct[p.product_id] || 0) + (p.quantity_produced || 0);
+          (prodByProduct[p.product_id] || 0) + (p.quantity || 0);
       });
 
       const revenueByProduct: Record<string, number> = {};

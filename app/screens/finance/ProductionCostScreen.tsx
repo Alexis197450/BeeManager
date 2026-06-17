@@ -1,14 +1,19 @@
-// app/screens/finance/ProductionCostScreen.tsx
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║              ProductionCostScreen.tsx                              ║
+// ║      Ανάλυση Κόστους Παραγωγής ΑΝΑ ΚΑΤΗΓΟΡΙΑ                     ║
+// ║                SESSION 16 — REWRITE                               ║
+// ╚════════════════════════════════════════════════════════════════════╝
+
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
-  TouchableOpacity,
+  TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  costingService, productsService, expensesService, assetsService,
+  costingService,
+  CategoryCostBreakdown,
 } from '../../services/financeService';
-import { CostBreakdown, CATEGORY_INFO, Product } from '../../types/beemanager_finance_types';
 
 const C = {
   primary: '#F59E0B', primaryDark: '#D97706', primaryLight: '#FEF3C7',
@@ -22,6 +27,12 @@ const C = {
 function euro(n: number): string {
   return `€${n.toFixed(2)}`;
 }
+
+const METHOD_LABELS: Record<string, string> = {
+  revenue:    'Βάσει εσόδων',
+  production: 'Βάσει παραγωγής',
+  equal:      'Ίση κατανομή',
+};
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -47,11 +58,10 @@ export default function ProductionCostScreen({ route }: any) {
   const { year } = route.params ?? { year: new Date().getFullYear() };
   const { user } = useAuth();
 
-  const [loading,    setLoading]    = useState(true);
-  const [products,   setProducts]   = useState<Product[]>([]);
-  const [breakdowns, setBreakdowns] = useState<(CostBreakdown | null)[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState(0);
-  const [totalShared, setTotalShared] = useState(0);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [breakdowns, setBreakdowns]     = useState<CategoryCostBreakdown[]>([]);
+  const [selectedIdx, setSelectedIdx]   = useState(0);
 
   useEffect(() => {
     if (user) loadData();
@@ -61,20 +71,19 @@ export default function ProductionCostScreen({ route }: any) {
     if (!user) return;
     setLoading(true);
     try {
-      const prods = await productsService.getAll(user.id);
-      setProducts(prods);
-
-      const bds = await Promise.all(
-        prods.map(p => costingService.getCostBreakdown(user.id, p.id, year))
-      );
+      const bds = await costingService.getAllCategoryBreakdowns(user.id, year);
       setBreakdowns(bds);
-
-      const expSum = await expensesService.summaryByCategory(user.id, year);
-      setTotalShared(expSum.grandTotal);
+      if (selectedIdx >= bds.length) setSelectedIdx(0);
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
+  }
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
   }
 
   if (loading) {
@@ -86,7 +95,7 @@ export default function ProductionCostScreen({ route }: any) {
     );
   }
 
-  if (products.length === 0) {
+  if (breakdowns.length === 0) {
     return (
       <View style={s.center}>
         <Text style={s.emptyIcon}>📊</Text>
@@ -96,25 +105,28 @@ export default function ProductionCostScreen({ route }: any) {
   }
 
   const bd = breakdowns[selectedIdx];
-  const product = products[selectedIdx];
-  const catInfo = product ? CATEGORY_INFO[product.category] : null;
 
-  // Σύνοψη όλων των προϊόντων
-  const totalCostAll    = breakdowns.reduce((s, b) => s + (b?.summary.totalCost    ?? 0), 0);
-  const totalRevenueAll = breakdowns.reduce((s, b) => s + (b?.summary.totalRevenue ?? 0), 0);
+  // Σύνοψη όλων των κατηγοριών
+  const totalCostAll    = breakdowns.reduce((s, b) => s + b.totalCost, 0);
+  const totalRevenueAll = breakdowns.reduce((s, b) => s + b.totalRevenue, 0);
   const totalProfitAll  = totalRevenueAll - totalCostAll;
+  const sharedTotal     = (bd?.sharedExpensesTotal || 0) + (bd?.sharedDepreciationTotal || 0);
 
   return (
-    <ScrollView style={s.container} contentContainerStyle={s.content}>
+    <ScrollView
+      style={s.container}
+      contentContainerStyle={s.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[C.primary]} />}
+    >
       <Text style={s.yearBadge}>📅 Έτος {year}</Text>
 
-      {/* Σύνοψη έτους */}
+      {/* ── Σύνοψη έτους ── */}
       <View style={s.summaryCard}>
         <Text style={s.summaryTitle}>Σύνοψη Έτους</Text>
         <View style={s.summaryRow}>
           <View style={s.summaryItem}>
             <Text style={s.summaryLabel}>Κοινά Έξοδα</Text>
-            <Text style={s.summaryValue}>{euro(totalShared)}</Text>
+            <Text style={s.summaryValue}>{euro(sharedTotal)}</Text>
           </View>
           <View style={s.summaryItem}>
             <Text style={s.summaryLabel}>Συν. Έσοδα</Text>
@@ -129,96 +141,124 @@ export default function ProductionCostScreen({ route }: any) {
         </View>
       </View>
 
-      {/* Επιλογή προϊόντος */}
+      {/* ── Επιλογή κατηγορίας (tabs) ── */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tabs}>
-        {products.map((p, i) => {
-          const ci = CATEGORY_INFO[p.category];
-          return (
-            <TouchableOpacity
-              key={p.id}
-              style={[s.tab, selectedIdx === i && s.tabActive]}
-              onPress={() => setSelectedIdx(i)}
-              activeOpacity={0.8}
-            >
-              <Text style={s.tabEmoji}>{ci.emoji}</Text>
-              <Text style={[s.tabTxt, selectedIdx === i && s.tabTxtActive]}>{p.name}</Text>
-            </TouchableOpacity>
-          );
-        })}
+        {breakdowns.map((b, i) => (
+          <TouchableOpacity
+            key={b.category}
+            style={[s.tab, selectedIdx === i && s.tabActive]}
+            onPress={() => setSelectedIdx(i)}
+            activeOpacity={0.8}
+          >
+            <Text style={s.tabEmoji}>{b.categoryEmoji}</Text>
+            <Text style={[s.tabTxt, selectedIdx === i && s.tabTxtActive]}>
+              {b.categoryLabel}
+            </Text>
+            {b.totalProduction > 0 && (
+              <Text style={s.tabSub}>{b.totalProduction} {b.productionUnit}</Text>
+            )}
+          </TouchableOpacity>
+        ))}
       </ScrollView>
 
-      {/* Ανάλυση επιλεγμένου προϊόντος */}
-      {!bd ? (
-        <View style={s.card}>
-          <Text style={s.noData}>Δεν υπάρχουν δεδομένα για {product?.name ?? '—'}</Text>
+      {/* ── Header κατηγορίας ── */}
+      <View style={[s.card, s.categoryHeader]}>
+        <Text style={s.categoryEmoji}>{bd.categoryEmoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.categoryName}>{bd.categoryLabel}</Text>
+          <Text style={s.categoryMeta}>
+            {bd.products.length} προϊόν{bd.products.length !== 1 ? 'τα' : ''}
+            {bd.totalProduction > 0 ? ` · ${bd.totalProduction} ${bd.productionUnit}` : ''}
+          </Text>
         </View>
-      ) : (
-        <>
-          {/* Header προϊόντος */}
-          <View style={[s.card, s.productHeader]}>
-            <Text style={s.productEmoji}>{catInfo?.emoji ?? '📦'}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.productName}>{bd.productName}</Text>
-              <Text style={s.productUnit}>
-                Παραγωγή: {bd.quantityProduced} {bd.unit}
+        <View style={s.unitCostBadge}>
+          <Text style={s.unitCostLabel}>Κόστος/{bd.productionUnit}</Text>
+          <Text style={s.unitCostValue}>
+            {bd.totalProduction > 0 ? euro(bd.unitCost) : '—'}
+          </Text>
+        </View>
+      </View>
+
+      {/* ── Άμεσα κόστη ── */}
+      <Section title="🎯 Άμεσα Κόστη">
+        <Row label="Άμεσα Έξοδα"       value={euro(bd.directExpenses)} />
+        <Row label="Άμεσες Αποσβέσεις" value={euro(bd.directDepreciation)} />
+        <Row label="Σύνολο Άμεσων"     value={euro(bd.directTotal)} bold />
+      </Section>
+
+      {/* ── Κοινά κόστη ── */}
+      <Section title="🔗 Κατανεμημένα Κοινά Κόστη">
+        <Row label="Κοινά Έξοδα (σύνολο)"  value={euro(bd.sharedExpensesTotal)} />
+        <Row label="Κοινές Αποσβέσεις"     value={euro(bd.sharedDepreciationTotal)} />
+        <Row
+          label="% Κατανομής"
+          value={`${bd.allocationPercentage.toFixed(1)}%`}
+        />
+        <View style={s.methodBadge}>
+          <Text style={s.methodTxt}>
+            Μέθοδος: {METHOD_LABELS[bd.allocationMethod] || bd.allocationMethod}
+          </Text>
+        </View>
+        <Row label="Κατανεμημένο Ποσό" value={euro(bd.allocatedShared)} bold />
+      </Section>
+
+      {/* ── Σύνοψη κατηγορίας ── */}
+      <Section title="📊 Σύνοψη">
+        <Row label="Συνολικό Κόστος"   value={euro(bd.totalCost)} bold />
+        <Row
+          label={`Κόστος/${bd.productionUnit}`}
+          value={bd.totalProduction > 0 ? `${euro(bd.unitCost)}/${bd.productionUnit}` : '—'}
+          bold
+          color={C.primaryDark}
+        />
+        <Row label="Συν. Έσοδα"       value={euro(bd.totalRevenue)} />
+        <Row
+          label="Μικτό Κέρδος"
+          value={euro(bd.grossProfit)}
+          bold
+          color={bd.grossProfit >= 0 ? C.green : C.red}
+        />
+        <Row
+          label="Περιθώριο"
+          value={`${bd.grossMarginPct.toFixed(1)}%`}
+          color={bd.grossMarginPct >= 20 ? C.green : C.red}
+        />
+      </Section>
+
+      {/* ── Ενδεικτικές τιμές πώλησης ── */}
+      {bd.unitCost > 0 && (
+        <Section title="💡 Ενδεικτικές Τιμές Πώλησης">
+          {[20, 30, 40].map(margin => {
+            const price = bd.unitCost / (1 - margin / 100);
+            return (
+              <Row
+                key={margin}
+                label={`Με ${margin}% περιθώριο`}
+                value={`${euro(price)}/${bd.productionUnit}`}
+              />
+            );
+          })}
+        </Section>
+      )}
+
+      {/* ── Ανάλυση ανά προϊόν ── */}
+      {bd.productBreakdowns.length > 0 && (
+        <Section title="📦 Προϊόντα Κατηγορίας">
+          {bd.productBreakdowns.map((pb) => (
+            <View key={pb.productId} style={s.productRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.productName}>{pb.productName}</Text>
+                <Text style={s.productMeta}>
+                  Παραγωγή: {pb.production} {bd.productionUnit}
+                  {pb.revenue > 0 ? ` · Έσοδα: ${euro(pb.revenue)}` : ''}
+                </Text>
+              </View>
+              <Text style={s.productCost}>
+                {pb.production > 0 ? `${euro(pb.unitCost)}/${bd.productionUnit}` : '—'}
               </Text>
             </View>
-            <View style={s.unitCostBadge}>
-              <Text style={s.unitCostLabel}>Κόστος/μονάδα</Text>
-              <Text style={s.unitCostValue}>{euro(bd.summary.unitCost)}</Text>
-            </View>
-          </View>
-
-          {/* Άμεσα κόστη */}
-          <Section title="🎯 Άμεσα Κόστη">
-            <Row label="Άμεσα Έξοδα"        value={euro(bd.directCosts.expenses)}     />
-            <Row label="Άμεσες Αποσβέσεις"  value={euro(bd.directCosts.depreciation)} />
-            <Row label="Σύνολο Άμεσων"      value={euro(bd.directCosts.total)} bold    />
-          </Section>
-
-          {/* Κοινά κόστη */}
-          <Section title="🔗 Κατανεμημένα Κοινά Κόστη">
-            <Row label="Κοινά Έξοδα (σύνολο)"    value={euro(bd.sharedCosts.expenses)}     />
-            <Row label="Κοινές Αποσβέσεις"        value={euro(bd.sharedCosts.depreciation)} />
-            <Row label="% Κατανομής"              value={`${bd.sharedCosts.allocatedPercentage.toFixed(1)}%`} />
-            <Row label="Κατανεμημένο Ποσό"        value={euro(bd.sharedCosts.total)} bold />
-          </Section>
-
-          {/* Σύνοψη προϊόντος */}
-          <Section title="📊 Σύνοψη">
-            <Row label="Συνολικό Κόστος"    value={euro(bd.summary.totalCost)}    bold />
-            <Row label="Κόστος/μονάδα"      value={`${euro(bd.summary.unitCost)}/${bd.unit}`} bold color={C.primaryDark} />
-            <Row label="Ποσότητα Πωλήθηκε"  value={`${bd.summary.quantitySold} ${bd.unit}`}  />
-            <Row label="Συν. Έσοδα"         value={euro(bd.summary.totalRevenue)} />
-            <Row
-              label="Μικτό Κέρδος"
-              value={euro(bd.summary.grossProfit)}
-              bold
-              color={bd.summary.grossProfit >= 0 ? C.green : C.red}
-            />
-            <Row
-              label="Περιθώριο"
-              value={`${bd.summary.grossMarginPct.toFixed(1)}%`}
-              color={bd.summary.grossMarginPct >= 20 ? C.green : C.red}
-            />
-          </Section>
-
-          {/* Τιμολόγηση */}
-          {bd.summary.unitCost > 0 && (
-            <Section title="💡 Ενδεικτικές Τιμές Πώλησης">
-              {[20, 30, 40].map(margin => {
-                const price = bd.summary.unitCost / (1 - margin / 100);
-                return (
-                  <Row
-                    key={margin}
-                    label={`Με ${margin}% περιθώριο`}
-                    value={`${euro(price)}/${bd.unit}`}
-                  />
-                );
-              })}
-            </Section>
-          )}
-        </>
+          ))}
+        </Section>
       )}
 
       <View style={{ height: 40 }} />
@@ -243,23 +283,24 @@ const s = StyleSheet.create({
   summaryLabel:{ fontSize: 11, color: C.textSub, marginBottom: 4 },
   summaryValue:{ fontSize: 16, fontWeight: '800', color: C.text },
 
-  tabs:    { marginBottom: 16 },
-  tab:     { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.card, marginRight: 8, alignItems: 'center' },
-  tabActive:{ backgroundColor: C.primaryLight, borderColor: C.primary },
-  tabEmoji: { fontSize: 18, marginBottom: 2 },
-  tabTxt:   { fontSize: 12, color: C.textSub, fontWeight: '500' },
+  tabs:      { marginBottom: 16 },
+  tab:       { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.card, marginRight: 8, alignItems: 'center', minWidth: 80 },
+  tabActive: { backgroundColor: C.primaryLight, borderColor: C.primary },
+  tabEmoji:  { fontSize: 22, marginBottom: 2 },
+  tabTxt:    { fontSize: 12, color: C.textSub, fontWeight: '500' },
   tabTxtActive: { color: C.primaryDark, fontWeight: '700' },
+  tabSub:    { fontSize: 10, color: C.textLight, marginTop: 2 },
 
   card: { backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
-  noData: { color: C.textLight, textAlign: 'center', paddingVertical: 20 },
 
-  productHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  productEmoji:  { fontSize: 36 },
-  productName:   { fontSize: 17, fontWeight: '800', color: C.text },
-  productUnit:   { fontSize: 13, color: C.textSub, marginTop: 2 },
+  categoryHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  categoryEmoji:  { fontSize: 40 },
+  categoryName:   { fontSize: 18, fontWeight: '800', color: C.text },
+  categoryMeta:   { fontSize: 12, color: C.textSub, marginTop: 3 },
+
   unitCostBadge: { backgroundColor: C.primaryLight, borderRadius: 12, padding: 10, alignItems: 'center' },
   unitCostLabel: { fontSize: 10, color: C.primaryDark, fontWeight: '600' },
-  unitCostValue: { fontSize: 16, fontWeight: '800', color: C.primaryDark },
+  unitCostValue: { fontSize: 16, fontWeight: '800', color: C.primaryDark, marginTop: 2 },
 
   section:      { backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: 8 },
@@ -267,4 +308,15 @@ const s = StyleSheet.create({
   row:       { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   rowLabel:  { fontSize: 13, color: C.textSub, flex: 1 },
   rowValue:  { fontSize: 13, fontWeight: '600', color: C.text },
+
+  methodBadge: { backgroundColor: C.blueLight, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start', marginVertical: 4 },
+  methodTxt:   { fontSize: 11, color: C.blue, fontWeight: '600' },
+
+  productRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
+  },
+  productName: { fontSize: 13, fontWeight: '600', color: C.text },
+  productMeta: { fontSize: 11, color: C.textSub, marginTop: 2 },
+  productCost: { fontSize: 14, fontWeight: '700', color: C.primaryDark },
 });

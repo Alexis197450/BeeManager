@@ -1,7 +1,7 @@
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║           Finance Service - Activity-Based Costing (ABC)           ║
 // ║                    Core Calculation Engine                         ║
-// ║                 FULL VERSION WITH PACKAGING                        ║
+// ║          SESSION 16 — CATEGORY-LEVEL COSTING + FALLBACK           ║
 // ╚════════════════════════════════════════════════════════════════════╝
 
 import { supabase } from '../supabase';
@@ -20,6 +20,44 @@ import {
   AssetInventory,
 } from '../types/beemanager_finance_types';
 
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║ CATEGORY COST BREAKDOWN TYPE
+// ╚════════════════════════════════════════════════════════════════════╝
+
+export interface CategoryCostBreakdown {
+  category: string;
+  categoryLabel: string;
+  categoryEmoji: string;
+  products: Product[];
+
+  directExpenses: number;
+  directDepreciation: number;
+  directTotal: number;
+
+  sharedExpensesTotal: number;
+  sharedDepreciationTotal: number;
+  allocationPercentage: number;
+  allocatedShared: number;
+  allocationMethod: 'revenue' | 'production' | 'equal';
+
+  totalCost: number;
+  totalProduction: number;
+  productionUnit: string;
+  unitCost: number;
+
+  totalRevenue: number;
+  grossProfit: number;
+  grossMarginPct: number;
+
+  // Ανά προϊόν (μέσα στην κατηγορία)
+  productBreakdowns: {
+    productId: string;
+    productName: string;
+    production: number;
+    revenue: number;
+    unitCost: number;
+  }[];
+}
 
 
 // ╔════════════════════════════════════════════════════════════════════╗
@@ -94,11 +132,10 @@ export const productsService = {
 };
 
 // ╔════════════════════════════════════════════════════════════════════╗
-// ║ 2. PACKAGING SERVICE (NEW!)
+// ║ 2. PACKAGING SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const packagingService = {
-  // Παίρνει όλες τις συσκευασίες ενός προϊόντος
   async getByProduct(productId: string) {
     const { data, error } = await supabase
       .from('packaging_presets')
@@ -110,7 +147,6 @@ export const packagingService = {
     return data || [];
   },
 
-  // Παίρνει όλες τις συσκευασίες ενός χρήστη
   async getAllByUser(userId: string) {
     const { data, error } = await supabase
       .from('packaging_presets')
@@ -122,7 +158,6 @@ export const packagingService = {
     return data || [];
   },
 
-  // Δημιουργία μιας συσκευασίας
   async create(userId: string, input: any) {
     if (!userId) {
       throw new Error('User ID is required to create a packaging');
@@ -141,7 +176,6 @@ export const packagingService = {
     return data;
   },
 
-  // Δημιουργία ΠΟΛΛΩΝ συσκευασιών ταυτόχρονα
   async createMany(userId: string, inputs: any[]) {
     if (!userId) {
       throw new Error('User ID is required to create packagings');
@@ -166,7 +200,6 @@ export const packagingService = {
     return data || [];
   },
 
-  // Διαγραφή συσκευασίας
   async delete(packagingId: string) {
     const { error } = await supabase
       .from('packaging_presets')
@@ -176,7 +209,6 @@ export const packagingService = {
     if (error) throw error;
   },
 
-  // Set as default
   async setAsDefault(productId: string, packagingId: string) {
     await supabase
       .from('packaging_presets')
@@ -235,6 +267,21 @@ export const expensesService = {
     return data || [];
   },
 
+  // ── ΝΕΟ: Έξοδα άμεσα σε κατηγορία ──
+  async getDirectByCategory(userId: string, year: number, productCategory: string): Promise<ExpenseProduction[]> {
+    const { data, error } = await supabase
+      .from('expenses_production')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('year', year)
+      .eq('allocation_type', 'direct_to_category')
+      .eq('product_category', productCategory)
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
   async create(userId: string, input: any) {
     if (!userId) {
       throw new Error('User ID is required to create an expense');
@@ -284,6 +331,12 @@ export const expensesService = {
 
     if (error) throw error;
     return (data || []).reduce((sum, e) => sum + (e.amount || 0), 0);
+  },
+
+  // ── ΝΕΟ: Σύνολο άμεσων εξόδων κατηγορίας ──
+  async sumDirectByCategory(userId: string, year: number, productCategory: string): Promise<number> {
+    const catExpenses = await this.getDirectByCategory(userId, year, productCategory);
+    return catExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
   },
 
   async summaryByCategory(userId: string, year: number): Promise<ExpenseSummaryByCategory> {
@@ -382,16 +435,16 @@ export const assetsService = {
 
     const { total_cost, annual_depreciation, ...rest } = input;
 
-const { data, error } = await supabase
-  .from('fixed_assets')
-  .insert([
-    {
-      user_id: userId,
-      ...rest,
-      depreciation_rate: rate,
-      useful_life_years: life,
-    },
-  ])
+    const { data, error } = await supabase
+      .from('fixed_assets')
+      .insert([
+        {
+          user_id: userId,
+          ...rest,
+          depreciation_rate: rate,
+          useful_life_years: life,
+        },
+      ])
       .select()
       .single();
 
@@ -428,6 +481,19 @@ const { data, error } = await supabase
       .select('annual_depreciation')
       .eq('user_id', userId)
       .eq('allocation_type', 'shared');
+
+    if (error) throw error;
+    return (data || []).reduce((sum, a) => sum + (a.annual_depreciation || 0), 0);
+  },
+
+  // ── ΝΕΟ: Αποσβέσεις παγίων για προϊόντα μέσα σε κατηγορία ──
+  async sumDirectDepreciationForProducts(productIds: string[]): Promise<number> {
+    if (productIds.length === 0) return 0;
+    const { data, error } = await supabase
+      .from('fixed_assets')
+      .select('annual_depreciation')
+      .in('product_id', productIds)
+      .eq('allocation_type', 'direct_to_product');
 
     if (error) throw error;
     return (data || []).reduce((sum, a) => sum + (a.annual_depreciation || 0), 0);
@@ -492,6 +558,25 @@ export const productionService = {
   async getTotalByProduct(productId: string, year: number): Promise<number> {
     const logs = await this.getByProduct(productId, year);
     return logs.reduce((sum, log) => sum + (log.quantity_produced || 0), 0);
+  },
+
+  // ── ΝΕΟ: Σύνολο παραγωγής για πολλά προϊόντα ──
+  async getTotalForProducts(productIds: string[], year: number): Promise<number> {
+    if (productIds.length === 0) return 0;
+    let total = 0;
+    for (const pid of productIds) {
+      total += await this.getTotalByProduct(pid, year);
+    }
+    return total;
+  },
+
+  // ── ΝΕΟ: Παραγωγή ανά προϊόν (bulk) ──
+  async getProductionMap(productIds: string[], year: number): Promise<Record<string, number>> {
+    const map: Record<string, number> = {};
+    for (const pid of productIds) {
+      map[pid] = await this.getTotalByProduct(pid, year);
+    }
+    return map;
   },
 
   async create(userId: string, input: any) {
@@ -563,6 +648,26 @@ export const salesService = {
     return data || [];
   },
 
+  // ── ΝΕΟ: Έσοδα ανά κατηγορία ──
+  async getRevenueByCategory(
+    userId: string,
+    year: number,
+    products: Product[]
+  ): Promise<Record<string, number>> {
+    const sales = await this.getByYear(userId, year);
+    const productCategoryMap: Record<string, string> = {};
+    products.forEach(p => { productCategoryMap[p.id] = p.category; });
+
+    const revenueByCategory: Record<string, number> = {};
+    sales.forEach(s => {
+      const cat = productCategoryMap[s.product_id];
+      if (cat) {
+        revenueByCategory[cat] = (revenueByCategory[cat] || 0) + (s.total_amount || 0);
+      }
+    });
+    return revenueByCategory;
+  },
+
   async create(userId: string, input: any) {
     if (!userId) throw new Error('User ID is required to create a sale');
 
@@ -588,6 +693,7 @@ export const salesService = {
     if (error) throw error;
   },
 };
+
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║ 7. REVENUE MIX SERVICE
 // ╚════════════════════════════════════════════════════════════════════╝
@@ -634,23 +740,22 @@ export const revenueMixService = {
     if (error) throw error;
     return data;
   },
-async calculateActualMix(userId: string, year: number): Promise<Record<string, number>> {
-  const sales = await salesService.getByYear(userId, year);
 
-  const totalRevenue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
+  async calculateActualMix(userId: string, year: number): Promise<Record<string, number>> {
+    const sales = await salesService.getByYear(userId, year);
+    const totalRevenue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
 
-  if (totalRevenue === 0) return {};
+    if (totalRevenue === 0) return {};
 
-  const mix: Record<string, number> = {};
+    const mix: Record<string, number> = {};
+    sales.forEach((sale) => {
+      if (!mix[sale.product_id]) {
+        mix[sale.product_id] = 0;
+      }
+      mix[sale.product_id] += (sale.total_amount || 0) / totalRevenue;
+    });
 
-  sales.forEach((sale) => {
-    if (!mix[sale.product_id]) {
-      mix[sale.product_id] = 0;
-    }
-    mix[sale.product_id] += (sale.total_amount || 0) / totalRevenue;
-  });
-
-  return mix;
+    return mix;
   },
 
   async getMixPercentage(userId: string, year: number, productId: string): Promise<number> {
@@ -667,9 +772,212 @@ async calculateActualMix(userId: string, year: number): Promise<Record<string, n
 
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║ 8. CORE COSTING LOGIC (Activity-Based Costing)
+// ║    Τώρα με ΚΑΤΑΝΟΜΗ ΑΝΑ ΚΑΤΗΓΟΡΙΑ + FALLBACK
 // ╚════════════════════════════════════════════════════════════════════╝
 
 export const costingService = {
+
+  // ────────────────────────────────────────────────
+  // Υπολογισμός % κατανομής ΑΝΑ ΚΑΤΗΓΟΡΙΑ
+  // Προτεραιότητα: 1) Έσοδα  2) Παραγωγή  3) Ίση κατανομή
+  // ────────────────────────────────────────────────
+  async getCategoryAllocation(
+    userId: string,
+    year: number,
+    products: Product[]
+  ): Promise<{ allocation: Record<string, number>; method: 'revenue' | 'production' | 'equal' }> {
+
+    // Ομαδοποίηση προϊόντων ανά κατηγορία
+    const categories = [...new Set(products.map(p => p.category))];
+    if (categories.length === 0) return { allocation: {}, method: 'equal' };
+
+    // ── 1ο: Δοκίμασε κατανομή βάσει εσόδων ──
+    const revenueByCategory = await salesService.getRevenueByCategory(userId, year, products);
+    const totalRevenue = Object.values(revenueByCategory).reduce((a, b) => a + b, 0);
+
+    if (totalRevenue > 0) {
+      const allocation: Record<string, number> = {};
+      for (const cat of categories) {
+        allocation[cat] = ((revenueByCategory[cat] || 0) / totalRevenue) * 100;
+      }
+      return { allocation, method: 'revenue' };
+    }
+
+    // ── 2ο: Δοκίμασε κατανομή βάσει παραγωγής ──
+    const productionByCategory: Record<string, number> = {};
+    for (const cat of categories) {
+      const catProducts = products.filter(p => p.category === cat);
+      const catProductIds = catProducts.map(p => p.id);
+      productionByCategory[cat] = await productionService.getTotalForProducts(catProductIds, year);
+    }
+    const totalProduction = Object.values(productionByCategory).reduce((a, b) => a + b, 0);
+
+    if (totalProduction > 0) {
+      const allocation: Record<string, number> = {};
+      for (const cat of categories) {
+        allocation[cat] = ((productionByCategory[cat] || 0) / totalProduction) * 100;
+      }
+      return { allocation, method: 'production' };
+    }
+
+    // ── 3ο: Ίση κατανομή ──
+    const allocation: Record<string, number> = {};
+    const pct = 100 / categories.length;
+    for (const cat of categories) {
+      allocation[cat] = pct;
+    }
+    return { allocation, method: 'equal' };
+  },
+
+  // ────────────────────────────────────────────────
+  // ΚΟΣΤΟΣ ΑΝΑ ΚΑΤΗΓΟΡΙΑ — Το κεντρικό νέο method
+  // ────────────────────────────────────────────────
+  async getCategoryCostBreakdown(
+    userId: string,
+    year: number,
+    category: string,
+    categoryProducts: Product[],
+    allocationPct: number,
+    allocationMethod: 'revenue' | 'production' | 'equal',
+    sharedExpensesTotal: number,
+    sharedDepreciationTotal: number
+  ): Promise<CategoryCostBreakdown> {
+
+    const { CATEGORY_INFO } = require('../types/beemanager_finance_types');
+    const catInfo = CATEGORY_INFO[category] || { label: category, emoji: '📦', unit: 'pieces' };
+    const productIds = categoryProducts.map(p => p.id);
+
+    // ── Άμεσα κόστη κατηγορίας ──
+    // 1. Έξοδα direct_to_category
+    const directCatExpenses = await expensesService.sumDirectByCategory(userId, year, category);
+
+    // 2. Έξοδα direct_to_product (για τα προϊόντα αυτής της κατηγορίας)
+    let directProductExpenses = 0;
+    for (const pid of productIds) {
+      directProductExpenses += await expensesService.sumDirectByProduct(pid, year);
+    }
+
+    // 3. Αποσβέσεις παγίων (direct σε προϊόντα κατηγορίας)
+    const directDepreciation = await assetsService.sumDirectDepreciationForProducts(productIds);
+
+    const directExpenses = directCatExpenses + directProductExpenses;
+    const directTotal = directExpenses + directDepreciation;
+
+    // ── Κατανεμημένα κοινά κόστη ──
+    const allocFraction = allocationPct / 100;
+    const allocatedShared = (sharedExpensesTotal + sharedDepreciationTotal) * allocFraction;
+
+    // ── Σύνολα ──
+    const totalCost = directTotal + allocatedShared;
+
+    // ── Παραγωγή ──
+    const productionMap = await productionService.getProductionMap(productIds, year);
+    const totalProduction = Object.values(productionMap).reduce((a, b) => a + b, 0);
+    const unitCost = totalProduction > 0 ? totalCost / totalProduction : 0;
+
+    // ── Έσοδα ──
+    let totalRevenue = 0;
+    for (const pid of productIds) {
+      totalRevenue += await salesService.getTotalRevenueByProduct(pid, year);
+    }
+
+    const grossProfit = totalRevenue - totalCost;
+    const grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+
+    // ── Ανάλυση ανά προϊόν (ίδιο κόστος/μονάδα σε όλα τα προϊόντα κατηγορίας) ──
+    const productBreakdowns = [];
+    for (const p of categoryProducts) {
+      const prod = productionMap[p.id] || 0;
+      const rev = await salesService.getTotalRevenueByProduct(p.id, year);
+      productBreakdowns.push({
+        productId: p.id,
+        productName: p.name,
+        production: prod,
+        revenue: rev,
+        unitCost: unitCost, // ίδιο κόστος/μονάδα για όλα τα προϊόντα στην κατηγορία
+      });
+    }
+
+    return {
+      category,
+      categoryLabel: catInfo.label,
+      categoryEmoji: catInfo.emoji,
+      products: categoryProducts,
+
+      directExpenses,
+      directDepreciation,
+      directTotal,
+
+      sharedExpensesTotal,
+      sharedDepreciationTotal,
+      allocationPercentage: allocationPct,
+      allocatedShared,
+      allocationMethod,
+
+      totalCost,
+      totalProduction,
+      productionUnit: catInfo.unit || 'pieces',
+      unitCost,
+
+      totalRevenue,
+      grossProfit,
+      grossMarginPct,
+
+      productBreakdowns,
+    };
+  },
+
+  // ────────────────────────────────────────────────
+  // ΟΛΑ τα breakdowns ανά κατηγορία (για το Screen)
+  // ────────────────────────────────────────────────
+  async getAllCategoryBreakdowns(
+    userId: string,
+    year: number
+  ): Promise<CategoryCostBreakdown[]> {
+    try {
+      const products = await productsService.getAll(userId);
+      if (products.length === 0) return [];
+
+      // Κοινά κόστη
+      const sharedExpenses = await expensesService.sumSharedByYear(userId, year);
+      const sharedDepreciation = await assetsService.sumSharedDepreciation(userId);
+
+      // Κατανομή
+      const { allocation, method } = await this.getCategoryAllocation(userId, year, products);
+
+      // Ομαδοποίηση
+      const categoryMap: Record<string, Product[]> = {};
+      products.forEach(p => {
+        if (!categoryMap[p.category]) categoryMap[p.category] = [];
+        categoryMap[p.category].push(p);
+      });
+
+      // Υπολογισμός ανά κατηγορία
+      const breakdowns: CategoryCostBreakdown[] = [];
+      for (const [cat, catProducts] of Object.entries(categoryMap)) {
+        const bd = await this.getCategoryCostBreakdown(
+          userId, year, cat, catProducts,
+          allocation[cat] || 0,
+          method,
+          sharedExpenses,
+          sharedDepreciation
+        );
+        breakdowns.push(bd);
+      }
+
+      // Ταξινόμηση: πρώτα οι κατηγορίες με μεγαλύτερα κόστη
+      breakdowns.sort((a, b) => b.totalCost - a.totalCost);
+
+      return breakdowns;
+    } catch (error) {
+      console.error('[Costing] Error getting all category breakdowns:', error);
+      return [];
+    }
+  },
+
+  // ────────────────────────────────────────────────
+  // LEGACY: Κόστος ανά μεμονωμένο προϊόν (διατηρείται)
+  // ────────────────────────────────────────────────
   async calculateUnitCost(userId: string, productId: string, year: number): Promise<number> {
     try {
       if (!userId) throw new Error('User ID is required');
@@ -817,23 +1125,20 @@ export const dashboardService = {
     const expenseSummary = await expensesService.summaryByCategory(userId, year);
     const assetInventory = await assetsService.getInventory(userId);
 
-    const breakdowns = await Promise.all(
-      products.map(async (p) => ({
-        ...p,
-        breakdown: await costingService.getCostBreakdown(userId, p.id, year),
-      }))
-    );
+    // Χρησιμοποιούμε τα νέα category breakdowns
+    const categoryBreakdowns = await costingService.getAllCategoryBreakdowns(userId, year);
 
     const totalSharedCosts = expenseSummary.total + expenseSummary.depreciation;
-    const totalProduction = breakdowns.reduce((sum, b) => sum + (b.breakdown?.quantityProduced || 0), 0);
-    const totalRevenue = breakdowns.reduce((sum, b) => sum + (b.breakdown?.summary.totalRevenue || 0), 0);
-    const totalCost = breakdowns.reduce((sum, b) => sum + (b.breakdown?.summary.totalCost || 0), 0);
+    const totalProduction = categoryBreakdowns.reduce((sum, b) => sum + b.totalProduction, 0);
+    const totalRevenue = categoryBreakdowns.reduce((sum, b) => sum + b.totalRevenue, 0);
+    const totalCost = categoryBreakdowns.reduce((sum, b) => sum + b.totalCost, 0);
     const grossProfit = totalRevenue - totalCost;
     const grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
     return {
       year,
-      products: breakdowns,
+      products,
+      categoryBreakdowns,
       expenseSummary,
       assetInventory,
       totals: {

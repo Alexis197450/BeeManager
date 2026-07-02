@@ -83,6 +83,16 @@ export function isFinalEnd(text: string): boolean {
   return t.includes('οριστικο τελος') || t.includes('οριστικοτελος');
 }
 
+/** Ανιχνεύει prompt-echo: σιωπηλός ήχος κάνει το STT να επιστρέφει το ίδιο το prompt. */
+function isPromptEcho(text: string): boolean {
+  const t = normalizeGreek(text);
+  if (t.includes('μελισσοκομικ')) return true; // λέξη που υπάρχει ΜΟΝΟ στο prompt
+  const keys = ['ετοιμ', 'στοπ', 'παραλειψ', 'οριστικο τελος', 'κυψελ', 'πλαισι'];
+  let hits = 0;
+  for (const k of keys) if (t.includes(k)) hits++;
+  return hits >= 3; // πραγματική ομιλία δεν περιέχει 3+ εντολές μαζί
+}
+
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
   android: {
     extension: '.m4a',
@@ -244,12 +254,14 @@ export class GuidedVoiceSession {
           const res2 = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST', headers: { Authorization: `Bearer ${this.apiKey}` }, body: fd,
           });
-          if (res2.ok) { const d2 = await res2.json(); return (d2.text ?? '').trim(); }
+      if (res2.ok) { const d2 = await res2.json(); const t2 = (d2.text ?? '').trim(); return isPromptEcho(t2) ? '' : t2; }
+
         }
         return '';
       }
       const data = await res.json();
-      return (data.text ?? '').trim();
+      const out = (data.text ?? '').trim();
+      return isPromptEcho(out) ? '' : out;
     } catch { return ''; }
     finally { try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {} }
   }

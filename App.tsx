@@ -24,6 +24,7 @@ import AddAssetScreen       from './app/screens/finance/AddAssetScreen';
 import ProductionCostScreen from './app/screens/finance/ProductionCostScreen';
 import InspectionHistoryScreen from './app/screens/InspectionHistoryScreen';
 import HarvestHistoryScreen    from './app/screens/HarvestHistoryScreen';
+import CalendarScreen          from './app/screens/CalendarScreen';
 
 // ─── TYPE DEFINITIONS ─────────────────────────────────────────────────────
 export type RootStackParamList = {
@@ -44,6 +45,7 @@ export type RootStackParamList = {
   ProductionCost:{ year: number };
   InspectionHistory: undefined;
   HarvestHistory:    undefined;
+  Calendar:          undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -67,6 +69,7 @@ function AppNavigator() {
         <>
           <Stack.Screen name="Home"       component={HomeScreen}       options={{ title: '🐝 BeeManager' }} />
           <Stack.Screen name="Hives"      component={HivesScreen}      options={{ title: '🏠 Κυψέλες' }} />
+          <Stack.Screen name="Calendar"   component={CalendarScreen}   options={{ title: '📅 Ημερολόγιο' }} />
           <Stack.Screen name="Apiaries"   component={ApiariesScreen}   options={{ title: '📍 Μελισσοκομεία' }} />
           <Stack.Screen name="Queen"      component={QueenScreen}      options={{ title: '👑 Βασιλοτροφία' }} />
           <Stack.Screen name="Nucleus"    component={NucleusScreen}    options={{ title: '🐝 Παραφυάδες' }} />

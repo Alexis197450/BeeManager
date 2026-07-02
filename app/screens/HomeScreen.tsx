@@ -12,10 +12,16 @@ export default function HomeScreen({ navigation }: any) {
 
       <View style={styles.menuContainer}>
 
-        <TouchableOpacity style={[styles.menuButton, styles.menuButtonPrimary]}
+        <TouchableOpacity style={styles.menuButtonPrimary}
+          onPress={() => navigation.navigate('Calendar')}>
+          <Text style={styles.menuIcon}>📅</Text>
+          <Text style={[styles.menuText, { color: '#fff' }]}>Calendar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.menuButtonPrimary}
           onPress={() => navigation.navigate('Inspection', {})}>
           <Text style={styles.menuIcon}>🎙️</Text>
-          <Text style={[styles.menuText, { color: '#fff' }]}>Επιθεώρηση & Τρύγος</Text>
+          <Text style={[styles.menuText, { color: '#fff' }]}>Έναρξη Επιθεώρησης</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.menuButton}
@@ -68,11 +74,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center', gap: 20,
   },
   menuButton: {
-    backgroundColor: '#fff', width: 140, height: 140,
+    backgroundColor: '#fff', width: 140, height: 100,
     borderRadius: 20, alignItems: 'center', justifyContent: 'center', elevation: 5,
   },
   menuButtonPrimary: {
-    backgroundColor: '#F5A623', width: 300, height: 100,
+    backgroundColor: '#F5A623', width: 140, height: 100,
+    borderRadius: 20, alignItems: 'center', justifyContent: 'center', elevation: 5,
   },
   menuIcon: { fontSize: 40 },
   menuText: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 8, textAlign: 'center' },
